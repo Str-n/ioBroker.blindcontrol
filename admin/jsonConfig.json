@@ -1,0 +1,784 @@
+{
+  "type": "tabs",
+  "i18n": false,
+  "items": {
+    "_General": {
+      "type": "panel",
+      "label": "General",
+      "items": {
+        "enabled": {
+          "label": "enabled",
+          "sm": 6,
+          "type": "checkbox"
+        },
+        "dryRun": {
+          "label": "dryRun",
+          "sm": 6,
+          "type": "checkbox"
+        },
+        "controlStart": {
+          "label": "controlStart",
+          "sm": 6,
+          "type": "text"
+        },
+        "controlEnd": {
+          "label": "controlEnd",
+          "sm": 6,
+          "type": "text"
+        },
+        "earliestAutoOpen": {
+          "label": "earliestAutoOpen",
+          "sm": 6,
+          "type": "text"
+        },
+        "evaluationIntervalMinutes": {
+          "label": "evaluationIntervalMinutes",
+          "sm": 6,
+          "type": "number"
+        },
+        "minAutoMovementIntervalMinutes": {
+          "label": "minAutoMovementIntervalMinutes",
+          "sm": 6,
+          "type": "number"
+        },
+        "minPositionChange": {
+          "label": "minPositionChange",
+          "sm": 6,
+          "type": "number"
+        },
+        "startupDelaySeconds": {
+          "label": "startupDelaySeconds",
+          "sm": 6,
+          "type": "number"
+        },
+        "_help": {
+          "type": "staticText",
+          "text": "enabled and dryRun are initial defaults. Change the persistent control.* states at runtime. All times use the adapter host timezone; positions: 0 = closed, 100 = open.",
+          "sm": 12
+        }
+      }
+    },
+    "_Weather": {
+      "type": "panel",
+      "label": "Weather",
+      "items": {
+        "weatherProvider": {
+          "label": "weatherProvider",
+          "sm": 6,
+          "type": "select",
+          "options": [
+            {
+              "label": "openweathermap",
+              "value": "openweathermap"
+            },
+            {
+              "label": "custom",
+              "value": "custom"
+            }
+          ]
+        },
+        "openWeatherMapInstance": {
+          "label": "openWeatherMapInstance",
+          "sm": 6,
+          "type": "text"
+        },
+        "currentOutsideTemperatureState": {
+          "label": "currentOutsideTemperatureState",
+          "sm": 6,
+          "type": "objectId"
+        },
+        "currentCloudCoverState": {
+          "label": "currentCloudCoverState",
+          "sm": 6,
+          "type": "objectId"
+        },
+        "forecastMapping": {
+          "label": "forecastMapping",
+          "sm": 12,
+          "type": "table",
+          "items": [
+            {
+              "attr": "timeState",
+              "title": "timeState",
+              "type": "objectId",
+              "default": "",
+              "width": 240
+            },
+            {
+              "attr": "temperatureState",
+              "title": "temperatureState",
+              "type": "objectId",
+              "default": "",
+              "width": 240
+            },
+            {
+              "attr": "cloudsState",
+              "title": "cloudsState",
+              "type": "objectId",
+              "default": "",
+              "width": 240
+            }
+          ]
+        },
+        "heatLoadBaseTemperature": {
+          "label": "heatLoadBaseTemperature",
+          "sm": 6,
+          "type": "number"
+        },
+        "coolingTemperature": {
+          "label": "coolingTemperature",
+          "sm": 6,
+          "type": "number"
+        },
+        "coolingReductionPerHour": {
+          "label": "coolingReductionPerHour",
+          "sm": 6,
+          "type": "number"
+        },
+        "maxTemperatureCurve": {
+          "label": "maxTemperatureCurve",
+          "sm": 12,
+          "type": "table",
+          "items": [
+            {
+              "attr": "x",
+              "title": "x",
+              "type": "number",
+              "default": 0,
+              "width": 140
+            },
+            {
+              "attr": "y",
+              "title": "y",
+              "type": "number",
+              "default": 0,
+              "width": 140
+            }
+          ]
+        },
+        "heatLoadCurve": {
+          "label": "heatLoadCurve",
+          "sm": 12,
+          "type": "table",
+          "items": [
+            {
+              "attr": "x",
+              "title": "x",
+              "type": "number",
+              "default": 0,
+              "width": 140
+            },
+            {
+              "attr": "y",
+              "title": "y",
+              "type": "number",
+              "default": 0,
+              "width": 140
+            }
+          ]
+        },
+        "warmNightCurve": {
+          "label": "warmNightCurve",
+          "sm": 12,
+          "type": "table",
+          "items": [
+            {
+              "attr": "x",
+              "title": "x",
+              "type": "number",
+              "default": 0,
+              "width": 140
+            },
+            {
+              "attr": "y",
+              "title": "y",
+              "type": "number",
+              "default": 0,
+              "width": 140
+            }
+          ]
+        },
+        "maxTemperatureWeight": {
+          "label": "maxTemperatureWeight",
+          "sm": 6,
+          "type": "number"
+        },
+        "heatLoadWeight": {
+          "label": "heatLoadWeight",
+          "sm": 6,
+          "type": "number"
+        },
+        "warmNightWeight": {
+          "label": "warmNightWeight",
+          "sm": 6,
+          "type": "number"
+        },
+        "forecastWeight": {
+          "label": "forecastWeight",
+          "sm": 6,
+          "type": "number"
+        },
+        "roomTemperatureWeight": {
+          "label": "roomTemperatureWeight",
+          "sm": 6,
+          "type": "number"
+        }
+      }
+    },
+    "_Sun": {
+      "type": "panel",
+      "label": "Sun",
+      "items": {
+        "sunSource": {
+          "label": "sunSource",
+          "sm": 6,
+          "type": "select",
+          "options": [
+            {
+              "label": "coordinates",
+              "value": "coordinates"
+            },
+            {
+              "label": "states",
+              "value": "states"
+            }
+          ]
+        },
+        "latitude": {
+          "label": "latitude",
+          "sm": 6,
+          "type": "text"
+        },
+        "longitude": {
+          "label": "longitude",
+          "sm": 6,
+          "type": "text"
+        },
+        "sunAzimuthState": {
+          "label": "sunAzimuthState",
+          "sm": 6,
+          "type": "objectId"
+        },
+        "sunElevationState": {
+          "label": "sunElevationState",
+          "sm": 6,
+          "type": "objectId"
+        },
+        "sunsetState": {
+          "label": "sunsetState",
+          "sm": 6,
+          "type": "objectId"
+        },
+        "cloudAttenuation": {
+          "label": "cloudAttenuation",
+          "sm": 6,
+          "type": "number"
+        },
+        "futureExposureHours": {
+          "label": "futureExposureHours",
+          "sm": 6,
+          "type": "number"
+        },
+        "futureExposureWeight": {
+          "label": "futureExposureWeight",
+          "sm": 6,
+          "type": "number"
+        },
+        "_help": {
+          "type": "staticText",
+          "text": "Leave coordinates empty to use system.config. State azimuth: north=0°, east=90°. Coordinates are also used for future exposure and sunset. Without a sunset at polar latitudes, the latest vacation closing time is used.",
+          "sm": 12
+        }
+      }
+    },
+    "_Shading": {
+      "type": "panel",
+      "label": "Shading",
+      "items": {
+        "shadeLevels": {
+          "label": "shadeLevels",
+          "sm": 12,
+          "type": "table",
+          "items": [
+            {
+              "attr": "name",
+              "title": "name",
+              "type": "text",
+              "default": "",
+              "width": 140
+            },
+            {
+              "attr": "minExposure",
+              "title": "minExposure",
+              "type": "number",
+              "default": 0,
+              "width": 140
+            },
+            {
+              "attr": "position",
+              "title": "position",
+              "type": "number",
+              "default": 100,
+              "width": 140
+            }
+          ]
+        },
+        "heatRiskThresholds": {
+          "label": "heatRiskThresholds",
+          "sm": 6,
+          "type": "jsonEditor"
+        },
+        "daylightMinimumPositions": {
+          "label": "daylightMinimumPositions",
+          "sm": 6,
+          "type": "jsonEditor"
+        },
+        "roomTemperatureCurve": {
+          "label": "roomTemperatureCurve",
+          "sm": 12,
+          "type": "table",
+          "items": [
+            {
+              "attr": "x",
+              "title": "x",
+              "type": "number",
+              "default": 0,
+              "width": 140
+            },
+            {
+              "attr": "y",
+              "title": "y",
+              "type": "number",
+              "default": 0,
+              "width": 140
+            }
+          ]
+        },
+        "southTolerance": {
+          "label": "southTolerance",
+          "sm": 6,
+          "type": "number"
+        },
+        "extremeHeatExposure": {
+          "label": "extremeHeatExposure",
+          "sm": 6,
+          "type": "number"
+        },
+        "eveningStart": {
+          "label": "eveningStart",
+          "sm": 6,
+          "type": "text"
+        },
+        "eveningCoolingDelta": {
+          "label": "eveningCoolingDelta",
+          "sm": 6,
+          "type": "number"
+        },
+        "eveningCriticalRoomTemperature": {
+          "label": "eveningCriticalRoomTemperature",
+          "sm": 6,
+          "type": "number"
+        },
+        "solarExposureHysteresis": {
+          "label": "solarExposureHysteresis",
+          "sm": 6,
+          "type": "number"
+        },
+        "heatRiskHysteresis": {
+          "label": "heatRiskHysteresis",
+          "sm": 6,
+          "type": "number"
+        }
+      }
+    },
+    "_Manual": {
+      "type": "panel",
+      "label": "Manual",
+      "items": {
+        "manualHoldMinutes": {
+          "label": "manualHoldMinutes",
+          "sm": 6,
+          "type": "number"
+        },
+        "manualHoldLowExposureThreshold": {
+          "label": "manualHoldLowExposureThreshold",
+          "sm": 6,
+          "type": "number"
+        },
+        "manualDetectionTolerance": {
+          "label": "manualDetectionTolerance",
+          "sm": 6,
+          "type": "number"
+        },
+        "selfActionRecognitionTimeout": {
+          "label": "selfActionRecognitionTimeout",
+          "sm": 6,
+          "type": "number"
+        }
+      }
+    },
+    "_Emergency": {
+      "type": "panel",
+      "label": "Emergency",
+      "items": {
+        "emergencyEnabled": {
+          "label": "emergencyEnabled",
+          "sm": 6,
+          "type": "checkbox"
+        },
+        "emergencyRoomTemperature": {
+          "label": "emergencyRoomTemperature",
+          "sm": 6,
+          "type": "number"
+        },
+        "emergencyHeatRisk": {
+          "label": "emergencyHeatRisk",
+          "sm": 6,
+          "type": "number"
+        },
+        "emergencyMinMovementInterval": {
+          "label": "emergencyMinMovementInterval",
+          "sm": 6,
+          "type": "number"
+        }
+      }
+    },
+    "_Vacation": {
+      "type": "panel",
+      "label": "Vacation",
+      "items": {
+        "vacationSunsetOffsetMinutes": {
+          "label": "vacationSunsetOffsetMinutes",
+          "sm": 6,
+          "type": "number"
+        },
+        "vacationLatestCloseTime": {
+          "label": "vacationLatestCloseTime",
+          "sm": 6,
+          "type": "text"
+        }
+      }
+    },
+    "_Data": {
+      "type": "panel",
+      "label": "Data",
+      "items": {
+        "sunPositionMaxAge": {
+          "label": "sunPositionMaxAge",
+          "sm": 6,
+          "type": "number"
+        },
+        "weatherCurrentMaxAge": {
+          "label": "weatherCurrentMaxAge",
+          "sm": 6,
+          "type": "number"
+        },
+        "forecastMaxAge": {
+          "label": "forecastMaxAge",
+          "sm": 6,
+          "type": "number"
+        },
+        "roomTemperatureMaxAge": {
+          "label": "roomTemperatureMaxAge",
+          "sm": 6,
+          "type": "number"
+        },
+        "blindPositionMaxAge": {
+          "label": "blindPositionMaxAge",
+          "sm": 6,
+          "type": "number"
+        },
+        "contactMaxAge": {
+          "label": "contactMaxAge",
+          "sm": 6,
+          "type": "number"
+        },
+        "_help": {
+          "type": "staticText",
+          "text": "All maximum data ages are in minutes (state ts, not lc). Zero requires a fresh sample. Configure generous ages for sensors that report only changes.",
+          "sm": 12
+        }
+      }
+    },
+    "_Windows": {
+      "type": "panel",
+      "label": {
+        "en": "Windows",
+        "de": "Fenster"
+      },
+      "items": {
+        "windows": {
+          "label": {
+            "en": "Windows",
+            "de": "Fenster"
+          },
+          "sm": 12,
+          "type": "accordion",
+          "titleAttr": "name",
+          "xs": 12,
+          "items": [
+            {
+              "attr": "id",
+              "type": "text",
+              "default": "",
+              "label": {
+                "en": "Window ID",
+                "de": "Fenster-ID"
+              },
+              "xs": 12,
+              "sm": 6,
+              "newLine": true
+            },
+            {
+              "attr": "name",
+              "type": "text",
+              "default": "",
+              "label": {
+                "en": "Window name",
+                "de": "Fenstername"
+              },
+              "xs": 12,
+              "sm": 6,
+              "newLine": false
+            },
+            {
+              "attr": "enabled",
+              "type": "checkbox",
+              "default": true,
+              "label": {
+                "en": "Initially enabled",
+                "de": "Anfangs aktiviert"
+              },
+              "xs": 12,
+              "sm": 6,
+              "newLine": false
+            },
+            {
+              "attr": "blindSetState",
+              "type": "objectId",
+              "default": "",
+              "label": {
+                "en": "Blind target position state",
+                "de": "Datenpunkt für die Rollladen-Sollposition"
+              },
+              "xs": 12,
+              "sm": 12,
+              "newLine": true
+            },
+            {
+              "attr": "blindActualState",
+              "type": "objectId",
+              "default": "",
+              "label": {
+                "en": "Blind actual position state",
+                "de": "Datenpunkt für die Rollladen-Istposition"
+              },
+              "xs": 12,
+              "sm": 12,
+              "newLine": true
+            },
+            {
+              "attr": "roomTemperatureState",
+              "type": "objectId",
+              "default": "",
+              "label": {
+                "en": "Room temperature state",
+                "de": "Datenpunkt für die Raumtemperatur"
+              },
+              "xs": 12,
+              "sm": 12,
+              "newLine": true
+            },
+            {
+              "attr": "contactState",
+              "type": "objectId",
+              "default": "",
+              "label": {
+                "en": "Window / door contact state (optional)",
+                "de": "Datenpunkt für Fenster-/Türkontakt (optional)"
+              },
+              "xs": 12,
+              "sm": 12,
+              "newLine": true
+            },
+            {
+              "attr": "contactMode",
+              "type": "select",
+              "default": "blockClosing",
+              "options": [
+                {
+                  "label": "ignore",
+                  "value": "ignore"
+                },
+                {
+                  "label": "blockClosing",
+                  "value": "blockClosing"
+                },
+                {
+                  "label": "forceOpenWhileOpen",
+                  "value": "forceOpenWhileOpen"
+                }
+              ],
+              "label": {
+                "en": "Contact safety mode",
+                "de": "Sicherheitsmodus des Kontakts"
+              },
+              "xs": 12,
+              "sm": 6,
+              "newLine": false
+            },
+            {
+              "attr": "contactOpenValue",
+              "type": "text",
+              "default": "true",
+              "label": {
+                "en": "Contact value when open",
+                "de": "Kontaktwert bei geöffnetem Fenster"
+              },
+              "xs": 12,
+              "sm": 6,
+              "newLine": false
+            },
+            {
+              "attr": "contactClosedValue",
+              "type": "text",
+              "default": "false",
+              "label": {
+                "en": "Contact value when closed",
+                "de": "Kontaktwert bei geschlossenem Fenster"
+              },
+              "xs": 12,
+              "sm": 6,
+              "newLine": false
+            },
+            {
+              "attr": "safetyPosition",
+              "type": "number",
+              "default": 100,
+              "label": {
+                "en": "Safety opening position (%)",
+                "de": "Sicherheitsposition (%)"
+              },
+              "xs": 12,
+              "sm": 6,
+              "newLine": false
+            },
+            {
+              "attr": "windowAzimuth",
+              "type": "number",
+              "default": 180,
+              "label": {
+                "en": "Window direction (°)",
+                "de": "Fensterausrichtung (°)"
+              },
+              "xs": 12,
+              "sm": 6,
+              "newLine": true
+            },
+            {
+              "attr": "sunAzimuthMin",
+              "type": "number",
+              "default": "",
+              "label": {
+                "en": "Minimum sun azimuth (°, optional)",
+                "de": "Minimaler Sonnenazimut (°, optional)"
+              },
+              "xs": 12,
+              "sm": 6,
+              "newLine": true
+            },
+            {
+              "attr": "sunAzimuthMax",
+              "type": "number",
+              "default": "",
+              "label": {
+                "en": "Maximum sun azimuth (°, optional)",
+                "de": "Maximaler Sonnenazimut (°, optional)"
+              },
+              "xs": 12,
+              "sm": 6,
+              "newLine": false
+            },
+            {
+              "attr": "sunElevationMin",
+              "type": "number",
+              "default": "",
+              "label": {
+                "en": "Minimum sun elevation (°, optional)",
+                "de": "Minimale Sonnenhöhe (°, optional)"
+              },
+              "xs": 12,
+              "sm": 6,
+              "newLine": true
+            },
+            {
+              "attr": "sunElevationMax",
+              "type": "number",
+              "default": "",
+              "label": {
+                "en": "Maximum sun elevation (°, optional)",
+                "de": "Maximale Sonnenhöhe (°, optional)"
+              },
+              "xs": 12,
+              "sm": 6,
+              "newLine": false
+            },
+            {
+              "attr": "autoOpenMorning",
+              "type": "checkbox",
+              "default": false,
+              "label": {
+                "en": "Initially open automatically in the morning",
+                "de": "Anfangs morgens automatisch öffnen"
+              },
+              "xs": 12,
+              "sm": 6,
+              "newLine": true
+            },
+            {
+              "attr": "morningOpenPosition",
+              "type": "number",
+              "default": 100,
+              "label": {
+                "en": "Morning opening position (%)",
+                "de": "Öffnungsposition am Morgen (%)"
+              },
+              "xs": 12,
+              "sm": 6,
+              "newLine": false
+            },
+            {
+              "attr": "temperatureOffset",
+              "type": "number",
+              "default": 0,
+              "label": {
+                "en": "Room temperature correction (°C)",
+                "de": "Korrektur der Raumtemperatur (°C)"
+              },
+              "xs": 12,
+              "sm": 6,
+              "newLine": true
+            },
+            {
+              "attr": "heatProtectionOffset",
+              "type": "number",
+              "default": 0,
+              "label": {
+                "en": "Heat-risk correction (points)",
+                "de": "Korrektur des Hitzerisikos (Punkte)"
+              },
+              "xs": 12,
+              "sm": 6,
+              "newLine": false
+            }
+          ]
+        },
+        "_help": {
+          "type": "staticText",
+          "text": "Expand a window to edit its settings. Use stable unique IDs. enabled and autoOpenMorning are initial values; runtime switches retain changes from the dialog. Map windows.<id>.enabled in the VIS widget. All temperatures must be Celsius; positions must be linear 0–100 (use ioBroker aliases for other units).",
+          "sm": 12
+        }
+      }
+    }
+  }
+}

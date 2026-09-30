@@ -1,0 +1,39 @@
+{
+  "name": "iobroker.blindcontrol",
+  "version": "0.1.0",
+  "description": "Forecast-aware sun and heat protection for window blinds",
+  "main": "build/main.js",
+  "license": "MIT",
+  "author": "Nils",
+  "keywords": [
+    "ioBroker",
+    "blinds",
+    "shutters",
+    "heat protection"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "build/",
+    "admin/",
+    "io-package.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "npm run build && node test/engine.test.cjs && node test/adapter.test.cjs",
+    "prepack": "npm run build",
+    "admin:generate": "npm run build && node scripts/generate-admin.cjs"
+  },
+  "dependencies": {
+    "@iobroker/adapter-core": "^3.3.2",
+    "suncalc": "^1.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/suncalc": "^1.9.2",
+    "typescript": "^5.9.3"
+  }
+}

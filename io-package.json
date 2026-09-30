@@ -1,0 +1,229 @@
+{
+  "common": {
+    "name": "blindcontrol",
+    "version": "0.1.0",
+    "titleLang": {
+      "en": "Blind control",
+      "de": "Rollladensteuerung"
+    },
+    "desc": {
+      "en": "Forecast-aware sun and heat protection for window blinds",
+      "de": "Wetterabhängiger Sonnen- und Hitzeschutz für Rollläden"
+    },
+    "authors": [
+      "Nils"
+    ],
+    "license": "MIT",
+    "platform": "Javascript/Node.js",
+    "mode": "daemon",
+    "main": "build/main.js",
+    "icon": "blindcontrol.svg",
+    "enabled": true,
+    "compact": true,
+    "connectionType": "local",
+    "dataSource": "push",
+    "type": "climate-control",
+    "adminUI": {
+      "config": "json"
+    },
+    "dependencies": [
+      {
+        "js-controller": ">=6.0.0"
+      }
+    ],
+    "globalDependencies": [
+      {
+        "admin": ">=7.0.0"
+      }
+    ]
+  },
+  "native": {
+    "enabled": false,
+    "dryRun": true,
+    "controlStart": "06:00",
+    "controlEnd": "22:00",
+    "earliestAutoOpen": "07:00",
+    "evaluationIntervalMinutes": 5,
+    "minAutoMovementIntervalMinutes": 60,
+    "minPositionChange": 10,
+    "startupDelaySeconds": 30,
+    "weatherProvider": "openweathermap",
+    "openWeatherMapInstance": "openweathermap.0",
+    "currentOutsideTemperatureState": "",
+    "currentCloudCoverState": "",
+    "forecastMapping": [],
+    "heatLoadBaseTemperature": 22,
+    "coolingTemperature": 16,
+    "coolingReductionPerHour": 2,
+    "maxTemperatureCurve": [
+      {
+        "x": 20,
+        "y": 0
+      },
+      {
+        "x": 25,
+        "y": 35
+      },
+      {
+        "x": 28,
+        "y": 60
+      },
+      {
+        "x": 31,
+        "y": 80
+      },
+      {
+        "x": 34,
+        "y": 100
+      }
+    ],
+    "heatLoadCurve": [
+      {
+        "x": 0,
+        "y": 0
+      },
+      {
+        "x": 24,
+        "y": 30
+      },
+      {
+        "x": 48,
+        "y": 55
+      },
+      {
+        "x": 72,
+        "y": 75
+      },
+      {
+        "x": 96,
+        "y": 100
+      }
+    ],
+    "warmNightCurve": [
+      {
+        "x": 10,
+        "y": 0
+      },
+      {
+        "x": 15,
+        "y": 20
+      },
+      {
+        "x": 18,
+        "y": 50
+      },
+      {
+        "x": 20,
+        "y": 75
+      },
+      {
+        "x": 22,
+        "y": 100
+      }
+    ],
+    "roomTemperatureCurve": [
+      {
+        "x": 21,
+        "y": 0
+      },
+      {
+        "x": 23,
+        "y": 20
+      },
+      {
+        "x": 24,
+        "y": 40
+      },
+      {
+        "x": 25,
+        "y": 60
+      },
+      {
+        "x": 26,
+        "y": 75
+      },
+      {
+        "x": 28,
+        "y": 100
+      }
+    ],
+    "maxTemperatureWeight": 0.35,
+    "heatLoadWeight": 0.35,
+    "warmNightWeight": 0.3,
+    "forecastWeight": 0.7,
+    "roomTemperatureWeight": 0.3,
+    "sunSource": "coordinates",
+    "latitude": "",
+    "longitude": "",
+    "sunAzimuthState": "",
+    "sunElevationState": "",
+    "sunsetState": "",
+    "cloudAttenuation": 0.8,
+    "futureExposureHours": 3,
+    "futureExposureWeight": 0.8,
+    "shadeLevels": [
+      {
+        "name": "open",
+        "minExposure": 0,
+        "position": 100
+      },
+      {
+        "name": "light",
+        "minExposure": 25,
+        "position": 75
+      },
+      {
+        "name": "medium",
+        "minExposure": 45,
+        "position": 50
+      },
+      {
+        "name": "strong",
+        "minExposure": 65,
+        "position": 25
+      },
+      {
+        "name": "closed",
+        "minExposure": 85,
+        "position": 0
+      }
+    ],
+    "heatRiskThresholds": [
+      30,
+      55,
+      75
+    ],
+    "daylightMinimumPositions": [
+      75,
+      50,
+      25,
+      0
+    ],
+    "southTolerance": 45,
+    "extremeHeatExposure": 60,
+    "eveningStart": "16:00",
+    "eveningCoolingDelta": 2,
+    "eveningCriticalRoomTemperature": 26,
+    "solarExposureHysteresis": 5,
+    "heatRiskHysteresis": 5,
+    "manualHoldMinutes": 60,
+    "manualHoldLowExposureThreshold": 20,
+    "manualDetectionTolerance": 3,
+    "selfActionRecognitionTimeout": 120,
+    "emergencyEnabled": true,
+    "emergencyRoomTemperature": 28,
+    "emergencyHeatRisk": 90,
+    "emergencyMinMovementInterval": 15,
+    "vacationSunsetOffsetMinutes": 0,
+    "vacationLatestCloseTime": "22:00",
+    "sunPositionMaxAge": 15,
+    "weatherCurrentMaxAge": 180,
+    "forecastMaxAge": 360,
+    "roomTemperatureMaxAge": 1440,
+    "blindPositionMaxAge": 10080,
+    "contactMaxAge": 10080,
+    "windows": []
+  },
+  "objects": [],
+  "instanceObjects": []
+}
