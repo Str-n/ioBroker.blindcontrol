@@ -1,6 +1,6 @@
 import type { Config, WindowConfig } from './config';
 import { angleDistance, clamp, exposure, type SunPosition } from './solar';
-import { interpolate, type Weather } from './weather';
+import { forecastAt, interpolate, type Weather } from './weather';
 export interface Runtime {
     lastAutoAction: number;
     lastManualAction: number;
@@ -18,6 +18,11 @@ export interface Runtime {
     morningDate: string;
     vacationCloseDate: string;
     managedDate: string;
+    thermalActive: boolean;
+    roomOverheated: boolean;
+    openingSince: number;
+    openingTarget: number | null;
+    openingLastEvaluation: number;
 }
 export const newRuntime = (): Runtime => ({
     lastAutoAction: 0,
@@ -36,6 +41,11 @@ export const newRuntime = (): Runtime => ({
     morningDate: '',
     vacationCloseDate: '',
     managedDate: '',
+    thermalActive: false,
+    roomOverheated: false,
+    openingSince: 0,
+    openingTarget: null,
+    openingLastEvaluation: 0,
 });
 export interface Input {
     now: number;
@@ -44,6 +54,7 @@ export interface Input {
     vacationMode: boolean;
     dryRun: boolean;
     windowEnabled: boolean;
+    keepClosed?: boolean;
     position?: number;
     roomTemperature?: number;
     contactOpen?: boolean;
@@ -67,6 +78,11 @@ export interface Decision {
     nextAutoMovementAllowed: number;
     heatBand: number;
     shadeLevel: number;
+    thermalActive: boolean;
+    roomOverheated: boolean;
+    openingSince: number;
+    openingTarget: number | null;
+    openingLastEvaluation: number;
     event?: 'morning' | 'close';
 }
 export function localDate(now: number): string {
@@ -109,6 +125,11 @@ export function decide(i: Input, w: WindowConfig, c: Config, r: Runtime): Decisi
         nextAutoMovementAllowed: r.lastAutoAction ? r.lastAutoAction + c.minAutoMovementIntervalMinutes * 60000 : 0,
         heatBand: r.heatBand,
         shadeLevel: r.shadeLevel,
+        thermalActive: r.thermalActive,
+        roomOverheated: r.roomOverheated,
+        openingSince: 0,
+        openingTarget: null,
+        openingLastEvaluation: 0,
     };
     const block = (reason: string): Decision => {
         d.blocked = true;
@@ -126,6 +147,14 @@ export function decide(i: Input, w: WindowConfig, c: Config, r: Runtime): Decisi
         i.sun.elevation >= -90 &&
         i.sun.elevation <= 90;
     if (validRoom && i.weather.valid) {
+        const room = i.roomTemperature! + w.temperatureOffset;
+        d.roomOverheated =
+            room >= c.roomOverheatTemperature ||
+            (r.roomOverheated && room >= c.roomOverheatTemperature - c.roomOverheatHysteresis);
+        const roomRiskFloor = Math.max(
+            d.roomOverheated ? c.roomOverheatMinimumRisk : 0,
+            room >= c.emergencyRoomTemperature ? c.emergencyHeatRisk : 0,
+        );
         d.heatRisk = clamp(
             (i.weather.risk * c.forecastWeight +
                 interpolate(i.roomTemperature! + w.temperatureOffset, c.roomTemperatureCurve) *
@@ -133,7 +162,15 @@ export function decide(i: Input, w: WindowConfig, c: Config, r: Runtime): Decisi
                 (c.forecastWeight + c.roomTemperatureWeight) +
                 w.heatProtectionOffset,
         );
+        d.heatRisk = Math.max(d.heatRisk, roomRiskFloor);
         d.heatBand = hysteresis(d.heatRisk, c.heatRiskThresholds, r.heatBand, c.heatRiskHysteresis);
+        // Measured overheating takes effect immediately, including at a band boundary.
+        d.heatBand = Math.max(d.heatBand, c.heatRiskThresholds.filter((b) => roomRiskFloor >= b).length);
+        d.thermalActive =
+            d.roomOverheated ||
+            room >= c.emergencyRoomTemperature ||
+            d.heatRisk >= c.thermalActivationRisk ||
+            (r.thermalActive && d.heatRisk >= c.thermalActivationRisk - c.thermalActivationHysteresis);
     }
     if (validSun && i.weather.valid) {
         d.solarExposure = exposure(i.sun!, i.weather.clouds, w, c);
@@ -146,10 +183,7 @@ export function decide(i: Input, w: WindowConfig, c: Config, r: Runtime): Decisi
             c.solarExposureHysteresis,
         );
     }
-    d.manualHoldActive =
-        !!r.lastManualAction &&
-        (i.now < r.manualHoldUntil ||
-            (r.manualPosition !== null && d.solarExposure < c.manualHoldLowExposureThreshold));
+    d.manualHoldActive = !!r.lastManualAction && i.now < r.manualHoldUntil;
     if (!i.enabled) return block('GLOBAL_DISABLED');
     if (i.pauseToday) return block('PAUSED_TODAY');
     if (!i.weather.valid) return block('INVALID_FORECAST');
@@ -160,10 +194,14 @@ export function decide(i: Input, w: WindowConfig, c: Config, r: Runtime): Decisi
     if (w.contactState && w.contactMode !== 'ignore' && !i.contactValid) return block('INVALID_CONTACT');
     const position = i.position!,
         date = localDate(i.now);
-    let target = Math.max(c.shadeLevels[d.shadeLevel].position, c.daylightMinimumPositions[d.heatBand]);
+    let target = d.thermalActive
+        ? Math.max(c.shadeLevels[d.shadeLevel].position, c.daylightMinimumPositions[d.heatBand])
+        : 100;
     d.decisionReason =
         d.heatBand >= 3 ? 'EXTREME_HEAT_PROTECTION' : d.heatBand >= 2 ? 'HIGH_HEAT_PROTECTION' : 'SUN_PROTECTION';
+    if (!d.thermalActive) d.decisionReason = 'NO_THERMAL_DEMAND';
     if (
+        d.thermalActive &&
         d.heatBand === 3 &&
         angleDistance(w.windowAzimuth, 180) <= c.southTolerance &&
         d.decisionSolarExposure >= c.extremeHeatExposure
@@ -173,7 +211,7 @@ export function decide(i: Input, w: WindowConfig, c: Config, r: Runtime): Decisi
         c.emergencyEnabled &&
         i.roomTemperature! + w.temperatureOffset >= c.emergencyRoomTemperature &&
         d.heatRisk >= c.emergencyHeatRisk;
-    const nextForecast = i.weather.points.find((p) => p.time >= i.now + 2 * 3600000 && p.time <= i.now + 3.5 * 3600000);
+    const nextForecast = forecastAt(i.weather.interpolationPoints ?? i.weather.points, i.now + 3 * 3600000);
     const evening =
         i.now >= atTime(i.now, c.eveningStart) &&
         d.solarExposure > 0 &&
@@ -183,13 +221,16 @@ export function decide(i: Input, w: WindowConfig, c: Config, r: Runtime): Decisi
         !emergency &&
         r.manualPosition === null;
     if (evening) {
-        const next = [...c.shadeLevels]
+        const positions = [...c.shadeLevels]
             .map((p) => p.position)
-            .sort((a, b) => a - b)
-            .find((p) => p > position);
-        if (next !== undefined) {
-            target = next;
-            d.decisionReason = 'EVENING_RELAXATION';
+            .sort((a, b) => a - b);
+        // Relax the thermal target once, rather than ratcheting up from each actual position.
+        const relaxedTarget = positions.find((p) => p > target) ?? target;
+        if (relaxedTarget > position) {
+            target = Math.min(relaxedTarget, positions.find((p) => p > position) ?? relaxedTarget);
+            if (d.thermalActive) d.decisionReason = 'EVENING_RELAXATION';
+        } else {
+            target = relaxedTarget;
         }
     }
     const closingEvent = i.vacationMode && i.now >= i.vacationCloseTime;
@@ -217,15 +258,30 @@ export function decide(i: Input, w: WindowConfig, c: Config, r: Runtime): Decisi
     d.desiredPosition = clamp(target);
     d.effectiveTargetPosition = d.desiredPosition;
     if (i.contactOpen && w.contactMode !== 'ignore' && target < position) return block('CONTACT_OPEN');
+    // Only an event scheduled AFTER the manual action releases an extended hold.
+    const scheduledRelease =
+        (morningEvent && atTime(i.now, c.earliestAutoOpen) > r.lastManualAction) ||
+        (closingEvent && i.vacationCloseTime > r.lastManualAction);
+    d.manualHoldActive ||=
+        r.manualPosition !== null &&
+        !scheduledRelease &&
+        !safetyOpen &&
+        d.solarExposure < c.manualHoldLowExposureThreshold;
     if (d.manualHoldActive) return block('MANUAL_HOLD');
-    if (r.manualPosition !== null && r.manualDirection > 0 && target >= position && !closingEvent && !safetyOpen)
+    if (target > position && !safetyOpen) {
+        if (i.keepClosed) return block('KEEP_CLOSED');
+        if (r.manualPosition !== null && r.manualDirection < 0 && !scheduledRelease) {
+            d.manualHoldActive = true;
+            return block('MANUAL_CLOSED');
+        }
+    }
+    if (r.manualPosition !== null && r.manualDirection > 0 && target >= position && !scheduledRelease && !safetyOpen)
         return block('NO_RELEVANT_SOLAR_EXPOSURE');
     const emergencyClosing = emergency && target < position && !closingEvent && !safetyOpen;
     if (emergencyClosing) {
         d.nextAutoMovementAllowed = r.lastAutoAction ? r.lastAutoAction + c.emergencyMinMovementInterval * 60000 : 0;
         d.decisionReason = 'EMERGENCY_HEAT_PROTECTION';
     }
-    if (i.now < d.nextAutoMovementAllowed) return block('MIN_MOVEMENT_INTERVAL');
     if (!inControlTime(i.now, c) && !(i.vacationMode && (morningEvent || closingEvent)) && !safetyOpen)
         return block('OUTSIDE_CONTROL_TIME');
     if (target > position && i.now < atTime(i.now, c.earliestAutoOpen)) return block('EARLIEST_OPEN_NOT_REACHED');
@@ -233,6 +289,20 @@ export function decide(i: Input, w: WindowConfig, c: Config, r: Runtime): Decisi
     if (target > position && !morningEvent && !safetyOpen && r.managedDate !== date && !i.vacationMode)
         return block('MORNING_OPEN_DISABLED');
     if (Math.abs(target - position) < c.minPositionChange) return block('POSITION_CHANGE_TOO_SMALL');
+    const ordinaryOpening = target > position && !morningEvent && !safetyOpen;
+    if (ordinaryOpening) {
+        const continuous =
+            r.openingTarget === target &&
+            r.openingSince > 0 &&
+            i.now >= r.openingLastEvaluation &&
+            i.now - r.openingLastEvaluation <= Math.max(1, 2 * c.evaluationIntervalMinutes) * 60000;
+        d.openingSince = continuous ? r.openingSince : i.now;
+        d.openingTarget = target;
+        d.openingLastEvaluation = i.now;
+    }
+    if (i.now < d.nextAutoMovementAllowed) return block('MIN_MOVEMENT_INTERVAL');
+    if (ordinaryOpening && i.now - d.openingSince < c.openingStabilityMinutes * 60000)
+        return block('OPENING_NOT_STABLE');
     d.move = !i.dryRun;
     return d;
 }
@@ -280,5 +350,8 @@ export function observePosition(
     r.manualDirection = Math.sign(value - (previous ?? value));
     r.commandId = '';
     r.commandCompleted = false;
+    r.openingSince = 0;
+    r.openingTarget = null;
+    r.openingLastEvaluation = 0;
     return 'manual';
 }

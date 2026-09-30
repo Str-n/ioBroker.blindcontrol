@@ -47,6 +47,7 @@ const tabs = {
         'evaluationIntervalMinutes',
         'minAutoMovementIntervalMinutes',
         'minPositionChange',
+        'openingStabilityMinutes',
         'startupDelaySeconds',
     ],
     Weather: [
@@ -75,6 +76,7 @@ const tabs = {
         'sunElevationState',
         'sunsetState',
         'cloudAttenuation',
+        'lowSunFullStrengthElevation',
         'futureExposureHours',
         'futureExposureWeight',
     ],
@@ -90,6 +92,11 @@ const tabs = {
         'eveningCriticalRoomTemperature',
         'solarExposureHysteresis',
         'heatRiskHysteresis',
+        'thermalActivationRisk',
+        'thermalActivationHysteresis',
+        'roomOverheatTemperature',
+        'roomOverheatHysteresis',
+        'roomOverheatMinimumRisk',
     ],
     Manual: [
         'manualHoldMinutes',
@@ -254,6 +261,21 @@ items._Windows.items._help = {
 items._Sun.items._help = {
     type: 'staticText',
     text: 'Leave coordinates empty to use system.config. State azimuth: north=0°, east=90°. Coordinates are also used for future exposure and sunset. Without a sunset at polar latitudes, the latest vacation closing time is used.',
+    sm: 12,
+};
+items._Shading.items._help = {
+    type: 'staticText',
+    text: 'Heat shading activates at thermalActivationRisk and releases below that value minus thermalActivationHysteresis. roomOverheatTemperature independently enforces roomOverheatMinimumRisk; emergencyRoomTemperature enforces at least emergencyHeatRisk even with a cool forecast. Ordinary opening requires openingStabilityMinutes of stable decisions.',
+    sm: 12,
+};
+items._Manual.items._help = {
+    type: 'staticText',
+    text: 'The minimum manual hold always applies. A later scheduled morning or vacation closing releases extended holds. Manual closing prevents ordinary reopening; windows.<id>.keepClosed also prevents scheduled opening until cleared. Contact safety opening remains possible after the minimum hold and movement cooldown.',
+    sm: 12,
+};
+items._Weather.items._help = {
+    type: 'staticText',
+    text: 'Current observations take precedence. Otherwise current weather is interpolated only between surrounding forecast samples. With no surrounding samples, cloud cover is conservatively treated as clear and evening cooling is disabled when current temperature is unknown. Source diagnostics are under info.',
     sm: 12,
 };
 items._Windows.label = { en: 'Windows', de: 'Fenster' };

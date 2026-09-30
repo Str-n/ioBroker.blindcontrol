@@ -13,6 +13,7 @@ export interface ForecastPoint {
 export interface Weather {
     valid: boolean;
     points: ForecastPoint[];
+    interpolationPoints: ForecastPoint[];
     risk: number;
     max: number;
     min: number;
@@ -20,6 +21,25 @@ export interface Weather {
     coolingHours: number;
     outside: number;
     clouds: number;
+    outsideSource: 'observed' | 'interpolated' | 'unavailable';
+    cloudsSource: 'observed' | 'interpolated' | 'clear-sky-fallback';
+}
+
+// No extrapolation: a future observation must not masquerade as current weather.
+export function forecastAt(points: ForecastPoint[], time: number): ForecastPoint | undefined {
+    const right = points.findIndex((p) => p.time >= time);
+    if (right < 0) return undefined;
+    if (points[right].time === time) return points[right];
+    if (right === 0) return undefined;
+    const a = points[right - 1],
+        b = points[right];
+    if (b.time - a.time > 3.5 * 3600000) return undefined;
+    const fraction = (time - a.time) / (b.time - a.time);
+    return {
+        time,
+        temperature: a.temperature + (b.temperature - a.temperature) * fraction,
+        clouds: a.clouds + (b.clouds - a.clouds) * fraction,
+    };
 }
 export function numeric(s: Sample | undefined, now: number, maxAgeMinutes: number): number | undefined {
     if (
@@ -85,9 +105,11 @@ export function prepareWeather(now: number, states: Map<string, Sample>, c: Conf
             clouds > 100
         )
             continue;
-        if (time >= now && time <= now + 86400000) points.push({ time, temperature, clouds });
+        if (time >= now - 3.5 * 3600000 && time <= now + 86400000 + 3.5 * 3600000)
+            points.push({ time, temperature, clouds });
     }
-    const unique = [...new Map(points.map((p) => [p.time, p])).values()].sort((a, b) => a.time - b.time);
+    const interpolationPoints = [...new Map(points.map((p) => [p.time, p])).values()].sort((a, b) => a.time - b.time);
+    const unique = interpolationPoints.filter((p) => p.time >= now && p.time <= now + 86400000);
     // A 3-hour forecast must actually cover the next day, not just a single hot point.
     const valid =
         unique.length >= 2 &&
@@ -120,15 +142,16 @@ export function prepareWeather(now: number, states: Map<string, Sample>, c: Conf
     );
     const outsideValue = numeric(states.get(c.currentOutsideTemperatureState), now, c.weatherCurrentMaxAge);
     const cloudValue = numeric(states.get(c.currentCloudCoverState), now, c.weatherCurrentMaxAge);
-    const outside =
-        outsideValue !== undefined && outsideValue >= -90 && outsideValue <= 65
-            ? outsideValue
-            : (unique[0]?.temperature ?? NaN);
-    const clouds =
-        cloudValue !== undefined && cloudValue >= 0 && cloudValue <= 100 ? cloudValue : (unique[0]?.clouds ?? NaN);
+    const current = forecastAt(interpolationPoints, now);
+    const observedOutside = outsideValue !== undefined && outsideValue >= -90 && outsideValue <= 65;
+    const observedClouds = cloudValue !== undefined && cloudValue >= 0 && cloudValue <= 100;
+    const outside = observedOutside ? outsideValue : (current?.temperature ?? NaN);
+    // Uncertain current clouds must not reduce protection based on clouds hours away.
+    const clouds = observedClouds ? cloudValue : (current?.clouds ?? 0);
     return {
         valid,
         points: unique,
+        interpolationPoints,
         risk,
         max,
         min,
@@ -136,5 +159,7 @@ export function prepareWeather(now: number, states: Map<string, Sample>, c: Conf
         coolingHours,
         outside,
         clouds,
+        outsideSource: observedOutside ? 'observed' : current ? 'interpolated' : 'unavailable',
+        cloudsSource: observedClouds ? 'observed' : current ? 'interpolated' : 'clear-sky-fallback',
     };
 }

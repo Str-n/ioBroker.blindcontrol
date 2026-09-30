@@ -1,5 +1,19 @@
 # Spezifikation ioBroker-Adapter – Sonnen- und Hitzeschutzsteuerung für Rollläden
 
+## Nachtrag: Änderungen aus der Logikprüfung
+
+Die folgenden implementierten Regeln ersetzen bei Widersprüchen die ursprünglichen Details weiter unten. Konfiguration, Diagnose und Bedienung sind im [README](README.md) beschrieben.
+
+- Abendlockerung: Eine Stufe oberhalb des thermisch erforderlichen Ziels, schrittweise angefahren. Die aktuelle Position wird nicht zur immer weiter steigenden Zielvorgabe.
+- Öffnungsstabilität: Normales Öffnen benötigt standardmäßig 20 Minuten unveränderte Zielposition. Unterbrechungen und Neustarts setzen die Beobachtung zurück. Geplantes Morgenöffnen und Kontakt-Sicherheitsöffnen benötigen diese zusätzliche Wetterwartezeit nicht.
+- Solarmodell: Einfallswinkel auf senkrechte Fenster mit separater Horizontabschwächung; Sonnenpositionen werden für die Vorschau alle zehn Minuten berechnet, Wolkenwerte zeitlich interpoliert.
+- Thermischer Bedarf: Verschattung beginnt ab HeatRisk 20 und endet unter 15. Ohne thermischen Bedarf bleibt das Hitzeschutzziel vollständig offen; manuelle Vorgaben und Zeitregeln gelten weiterhin.
+- Überhitzte Räume: Ab 26 °C gilt unabhängig von der Prognose mindestens HeatRisk 75, bis die Temperatur unter 25,5 °C fällt. Ab 28 °C gilt mindestens HeatRisk 90. Die Emergency-Option verkürzt weiterhin ausschließlich die Sperrzeit für zusätzliches Schließen.
+- Manuelle Bedienung: Die Mindesthaltezeit bleibt verbindlich. Manuelles Schließen verhindert gewöhnliches Wiederöffnen auch bei Sonne. Erst ein nach dem Eingriff geplantes Morgen-/Urlaubsereignis löst eine verlängerte Sperre; zusätzliche automatische Verschattung löscht die Schließpräferenz nicht. Der persistente Schalter `windows.<id>.keepClosed` verhindert auch geplantes Öffnen, bis er zurückgenommen wird; Kontakt-Sicherheitsöffnen bleibt nach den bestehenden Sperrzeiten möglich.
+- Aktuelles Wetter: Messwerte haben Vorrang. Ersatzwerte werden nur zwischen zeitlich umgebenden Prognosepunkten interpoliert. Ohne solche Punkte wird die aktuelle Außentemperatur als unbekannt und die Bewölkung vorsichtig als wolkenlos behandelt. Bei unbekannter Außentemperatur entfällt die Abendlockerung. Diagnose-States nennen die Datenquelle.
+
+---
+
 ## 1. Ziel
 
 Der Adapter steuert Rollläden abhängig von:

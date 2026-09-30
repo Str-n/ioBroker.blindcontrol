@@ -55,6 +55,7 @@ export const defaults = {
     evaluationIntervalMinutes: 5,
     minAutoMovementIntervalMinutes: 60,
     minPositionChange: 10,
+    openingStabilityMinutes: 20,
     startupDelaySeconds: 30,
     weatherProvider: 'openweathermap',
     openWeatherMapInstance: 'openweathermap.0',
@@ -105,6 +106,7 @@ export const defaults = {
     sunElevationState: '',
     sunsetState: '',
     cloudAttenuation: 0.8,
+    lowSunFullStrengthElevation: 10,
     futureExposureHours: 3,
     futureExposureWeight: 0.8,
     shadeLevels: [
@@ -123,6 +125,11 @@ export const defaults = {
     eveningCriticalRoomTemperature: 26,
     solarExposureHysteresis: 5,
     heatRiskHysteresis: 5,
+    thermalActivationRisk: 20,
+    thermalActivationHysteresis: 5,
+    roomOverheatTemperature: 26,
+    roomOverheatHysteresis: 0.5,
+    roomOverheatMinimumRisk: 75,
     manualHoldMinutes: 60,
     manualHoldLowExposureThreshold: 20,
     manualDetectionTolerance: 3,
@@ -236,6 +243,18 @@ export function parseConfig(native: Record<string, unknown>): Config {
         config.minPositionChange <= 0
     )
         throw new Error('Invalid interval, change threshold or exposure factor');
+    if (
+        config.thermalActivationRisk > 100 ||
+        config.thermalActivationHysteresis > config.thermalActivationRisk ||
+        config.roomOverheatMinimumRisk > 100 ||
+        config.emergencyHeatRisk > 100 ||
+        config.roomOverheatTemperature > config.emergencyRoomTemperature ||
+        config.roomOverheatHysteresis > config.roomOverheatTemperature ||
+        config.lowSunFullStrengthElevation <= 0 ||
+        config.lowSunFullStrengthElevation > 45 ||
+        config.futureExposureHours > 24
+    )
+        throw new Error('Invalid thermal or solar protection settings');
     if (
         !Array.isArray(config.forecastMapping) ||
         (config.weatherProvider === 'custom' && !config.forecastMapping.length) ||

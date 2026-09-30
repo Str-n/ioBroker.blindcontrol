@@ -10,8 +10,8 @@ const {
     observePosition,
     hysteresis,
 } = require('../build/lib/engine');
-const { prepareWeather, forecastMappings, numeric, interpolate } = require('../build/lib/weather');
-const { exposure, solarPosition } = require('../build/lib/solar');
+const { prepareWeather, forecastMappings, forecastAt, numeric, interpolate } = require('../build/lib/weather');
+const { exposure, solarPosition, futureSunSamples } = require('../build/lib/solar');
 const now = new Date(2026, 6, 1, 12).getTime();
 const c = () => structuredClone(defaults);
 const w = () => ({
@@ -170,11 +170,11 @@ test('force-open safety position never closes an already more open blind', () =>
 });
 test('very hot south window closes fully, moderate weather preserves daylight', () => {
     assert.equal(run().effectiveTargetPosition, 0);
-    assert.equal(run({ roomTemperature: 21, weather: { ...weather(), risk: 10 } }).effectiveTargetPosition, 75);
+    assert.equal(run({ roomTemperature: 21, weather: { ...weather(), risk: 30 } }).effectiveTargetPosition, 75);
 });
 test('west window may close fully; future sun matters only at high heat', () => {
     const futureSuns = [{ sun: { azimuth: 270, elevation: 50 }, clouds: 0 }];
-    assert.equal(run({ sun: { azimuth: 270, elevation: 50 } }, { windowAzimuth: 270 }).effectiveTargetPosition, 0);
+    assert.equal(run({ sun: { azimuth: 270, elevation: 20 } }, { windowAzimuth: 270 }).effectiveTargetPosition, 0);
     assert(
         run({ futureSuns, sun: { azimuth: 90, elevation: 50 } }, { windowAzimuth: 270 }).effectiveTargetPosition < 100,
     );
@@ -213,6 +213,7 @@ test('evening cooling opens exactly one step from 25 to 50', () => {
         },
         {},
         { managedDate: localDate(now) },
+        { openingStabilityMinutes: 0 },
     );
     assert.equal(d.effectiveTargetPosition, 50);
     assert.equal(d.decisionReason, 'EVENING_RELAXATION');
@@ -230,7 +231,7 @@ test('vacation morning overrides opt-out and caps opening for heat', () => {
         position: 0,
         vacationMode: true,
         roomTemperature: 21,
-        weather: { ...weather(), risk: 10 },
+        weather: { ...weather(), risk: 30 },
     });
     assert.equal(d.decisionReason, 'VACATION_MORNING_OPEN');
     assert.equal(d.effectiveTargetPosition, 75);
@@ -395,4 +396,258 @@ test('OpenWeatherMap forecast uses per-period maximum temperatures without a tem
         prepareWeather(now, states, custom).points.map((p) => p.temperature),
         [10, 11, 12, 13, 14, 15, 16, 17],
     );
+});
+
+function rememberDecision(r, d) {
+    for (const key of ['heatBand', 'shadeLevel', 'thermalActive', 'roomOverheated', 'openingSince', 'openingTarget', 'openingLastEvaluation'])
+        r[key] = d[key];
+}
+
+test('evening relaxation converges to a stable target and never cycles back from fully open', () => {
+    const evening = atTime(now, '17:00');
+    const r = { ...newRuntime(), managedDate: localDate(now) };
+    let position = 25;
+    for (let hour = 0; hour < 5; hour++) {
+        const time = evening + hour * 3600000;
+        const d = run({
+            now: time, position, roomTemperature: 24,
+            sun: { azimuth: 270, elevation: 35 },
+            weather: { ...weather(), outside: 33, points: [{ time: time + 3 * 3600000, temperature: 29, clouds: 0 }] },
+        }, { windowAzimuth: 270 }, r, { openingStabilityMinutes: 0 });
+        assert.equal(d.effectiveTargetPosition, 50);
+        assert.equal(d.move, hour === 0);
+        if (d.move) { position = d.effectiveTargetPosition; r.lastAutoAction = time; }
+        rememberDecision(r, d);
+    }
+    const d = run({
+        now: evening, position: 100, roomTemperature: 24, sun: { azimuth: 270, elevation: 35 },
+        weather: { ...weather(), outside: 33, points: [{ time: evening + 3 * 3600000, temperature: 29, clouds: 0 }] },
+    }, { windowAzimuth: 270 });
+    assert.equal(d.effectiveTargetPosition, 50, 'fully open uses the same relaxed target');
+});
+
+test('a brief cloud never opens the blind or starts a closing cooldown', () => {
+    const r = { ...newRuntime(), managedDate: localDate(now), heatBand: 1, shadeLevel: 2 };
+    const cloud = run({ position: 50, roomTemperature: 24, weather: { ...weather(), risk: 40, clouds: 100 } }, {}, r);
+    assert.equal(cloud.effectiveTargetPosition, 100);
+    assert.equal(cloud.blockedReason, 'OPENING_NOT_STABLE');
+    rememberDecision(r, cloud);
+    const sun = run({ now: now + 5 * 60000, position: 50 }, {}, r);
+    assert.equal(sun.move, true, 'renewed heat protection remains possible immediately');
+    assert.equal(sun.effectiveTargetPosition, 0);
+    assert.equal(sun.openingSince, 0);
+});
+
+test('ordinary opening requires continuous stable evaluations and resets on interruptions', () => {
+    const r = { ...newRuntime(), managedDate: localDate(now) };
+    const changes = { position: 50, roomTemperature: 19, weather: { ...weather(), risk: 0 } };
+    for (let minute = 0; minute <= 20; minute += 5) {
+        const d = run({ ...changes, now: now + minute * 60000 }, {}, r);
+        assert.equal(d.move, minute === 20);
+        if (minute < 20) assert.equal(d.blockedReason, 'OPENING_NOT_STABLE');
+        rememberDecision(r, d);
+    }
+    const stale = run({ ...changes, now: now + 40 * 60000 }, {}, r);
+    assert.equal(stale.blockedReason, 'OPENING_NOT_STABLE');
+    assert.equal(stale.openingSince, now + 40 * 60000);
+    for (const interrupted of [{ enabled: false }, { pauseToday: true }, { weather: { ...weather(), valid: false } }]) {
+        const d = run({ ...changes, ...interrupted }, {}, r);
+        assert.equal(d.openingSince, 0);
+    }
+});
+
+test('an abrupt increase in the proposed opening must establish its own stability', () => {
+    const d = run({ position: 25, roomTemperature: 19, weather: { ...weather(), risk: 0 } }, {}, {
+        managedDate: localDate(now), openingSince: now - 30 * 60000,
+        openingLastEvaluation: now - 5 * 60000, openingTarget: 50,
+    });
+    assert.equal(d.effectiveTargetPosition, 100);
+    assert.equal(d.blockedReason, 'OPENING_NOT_STABLE');
+    assert.equal(d.openingSince, now);
+});
+
+test('thermal activation preserves daylight when cool and has a separate release hysteresis', () => {
+    const cold = run({ roomTemperature: 19, weather: { ...weather(), risk: 0 } });
+    assert.equal(cold.effectiveTargetPosition, 100);
+    assert.equal(cold.move, false);
+    assert.equal(cold.decisionReason, 'NO_THERMAL_DEMAND');
+    const r = newRuntime();
+    for (const [risk, active] of [[30, true], [22, true], [20, false]]) {
+        const d = run({ roomTemperature: 19, weather: { ...weather(), risk } }, {}, r);
+        assert.equal(d.thermalActive, active);
+        rememberDecision(r, d);
+    }
+});
+
+test('measured overheating enforces shading and emergency closing despite a cool forecast', () => {
+    const d = run({ roomTemperature: 30, weather: { ...weather(), risk: 0 } }, {}, {
+        heatBand: 0, lastAutoAction: now - 16 * 60000,
+    });
+    assert(d.heatRisk >= 90);
+    assert.equal(d.heatBand, 3);
+    assert.equal(d.effectiveTargetPosition, 0);
+    assert.equal(d.decisionReason, 'EMERGENCY_HEAT_PROTECTION');
+    assert.equal(d.move, true);
+    assert.equal(run({ roomTemperature: 30, weather: { ...weather(), risk: 0 } }, {}, {
+        lastAutoAction: now - 16 * 60000,
+    }, { emergencyEnabled: false }).blockedReason, 'MIN_MOVEMENT_INTERVAL');
+});
+
+test('room overheating has temperature hysteresis and respects the configured sensor offset', () => {
+    const r = newRuntime();
+    for (const [roomTemperature, overheated] of [[25, true], [24.7, true], [24.4, false]]) {
+        const d = run({ roomTemperature, weather: { ...weather(), risk: 0 } }, { temperatureOffset: 1 }, r);
+        assert.equal(d.roomOverheated, overheated);
+        if (overheated) assert(d.heatRisk >= 75);
+        rememberDecision(r, d);
+    }
+});
+
+test('vertical-window geometry protects low east/west sun and attenuates at the horizon', () => {
+    const west = { ...w(), windowAzimuth: 270 };
+    const low = exposure({ azimuth: 270, elevation: 8 }, 0, west, c());
+    assert(low > 65, 'low direct sun still needs substantial shading');
+    assert(exposure({ azimuth: 270, elevation: 80 }, 0, west, c()) < low);
+    assert(exposure({ azimuth: 270, elevation: 0.1 }, 0, west, c()) < 2);
+    assert.equal(exposure({ azimuth: 90, elevation: 8 }, 0, west, c()), 0);
+    const d = run({ position: 25, sun: { azimuth: 270, elevation: 8 } }, west, {
+        managedDate: localDate(now), heatBand: 3, shadeLevel: 3,
+    });
+    assert(d.effectiveTargetPosition <= 25);
+    const east = run({ sun: { azimuth: 90, elevation: 15 } }, { windowAzimuth: 90 });
+    assert.equal(east.effectiveTargetPosition, 0);
+});
+
+test('later scheduled events release extended manual holds, including after sunset', () => {
+    const evening = atTime(now, '22:00');
+    const d = run({ now: evening, vacationMode: true, sun: { azimuth: 320, elevation: -5 } }, {}, {
+        lastManualAction: evening - 3 * 3600000, manualHoldUntil: evening - 2 * 3600000,
+        manualPosition: 100, manualDirection: 1,
+    });
+    assert.equal(d.move, true);
+    assert.equal(d.decisionReason, 'VACATION_EVENING_CLOSE');
+    const morning = atTime(now, '07:00');
+    const r = {
+        lastManualAction: morning - 9 * 3600000, manualHoldUntil: morning - 8 * 3600000,
+        manualPosition: 0, manualDirection: -1,
+    };
+    const opened = run({ now: morning, position: 0, sun: { azimuth: 80, elevation: 15 } }, { autoOpenMorning: true }, r);
+    assert.equal(opened.move, true);
+    assert.equal(opened.effectiveTargetPosition, 100);
+    assert.equal(run({ now: morning, position: 0 }, { autoOpenMorning: true }, {
+        ...r, lastManualAction: morning - 30 * 60000, manualHoldUntil: morning + 30 * 60000,
+    }).blockedReason, 'MANUAL_HOLD');
+});
+
+test('manual closing preserves privacy in sunshine and is not undone by an earlier pending morning event', () => {
+    const r = {
+        lastManualAction: now - 2 * 3600000, manualHoldUntil: now - 3600000,
+        manualPosition: 0, manualDirection: -1, managedDate: localDate(now),
+    };
+    for (const morningDate of ['', localDate(now)]) {
+        const d = run({ position: 0, roomTemperature: 19, weather: { ...weather(), risk: 0 } },
+            { autoOpenMorning: true }, { ...r, morningDate });
+        assert.equal(d.move, false);
+        assert.equal(d.blockedReason, 'MANUAL_CLOSED');
+    }
+});
+
+test('persistent keepClosed blocks scheduled opening, but contact safety retains its minimum guards', () => {
+    const opening = { position: 0, keepClosed: true, sun: { azimuth: 0, elevation: 30 } };
+    assert.equal(run(opening, { autoOpenMorning: true }).blockedReason, 'KEEP_CLOSED');
+    const contactWindow = { contactState: 'contact', contactMode: 'forceOpenWhileOpen' };
+    assert.equal(run({ ...opening, contactOpen: true }, contactWindow).move, true);
+    assert.equal(run({ ...opening, contactOpen: true }, contactWindow, {
+        lastManualAction: now - 60000, manualHoldUntil: now + 59 * 60000, manualPosition: 0,
+    }).blockedReason, 'MANUAL_HOLD');
+    assert.equal(run({ ...opening, contactOpen: true }, contactWindow, {
+        lastAutoAction: now - 5 * 60000,
+    }).blockedReason, 'MIN_MOVEMENT_INTERVAL');
+});
+
+function interpolatedWeather(includePast = true, overrides = {}) {
+    const cfg = { ...c(), ...overrides };
+    const states = new Map();
+    const hours = includePast ? [-1, 2, 5, 8, 11, 14, 17, 20, 23, 26] : [2, 5, 8, 11, 14, 17, 20, 23, 26];
+    forecastMappings(cfg).slice(0, hours.length).forEach((m, index) => {
+        const h = hours[index];
+        for (const [id, val] of [[m.timeState, now + h * 3600000], [m.temperatureState, 30 - h * 2], [m.cloudsState, h < 0 ? 0 : 90]])
+            states.set(id, { val, ts: now });
+    });
+    return { cfg, states, result: prepareWeather(now, states, cfg) };
+}
+
+test('current weather and the three-hour temperature are interpolated at their actual times', () => {
+    const { result } = interpolatedWeather();
+    assert.equal(result.valid, true);
+    assert.equal(result.outside, 30);
+    assert.equal(result.clouds, 30);
+    assert.equal(result.outsideSource, 'interpolated');
+    assert.equal(result.cloudsSource, 'interpolated');
+    assert.equal(forecastAt(result.interpolationPoints, now + 3 * 3600000).temperature, 24);
+    assert(result.points.every((p) => p.time >= now), 'past points only support interpolation');
+});
+
+test('observed weather wins; missing bracketing data never turns future clouds into present clouds', () => {
+    const { cfg, states } = interpolatedWeather(true, {
+        currentOutsideTemperatureState: 'outside', currentCloudCoverState: 'clouds',
+    });
+    states.set('outside', { val: 33, ts: now });
+    states.set('clouds', { val: 10, ts: now });
+    const measured = prepareWeather(now, states, cfg);
+    assert.equal(measured.outside, 33);
+    assert.equal(measured.clouds, 10);
+    assert.equal(measured.outsideSource, 'observed');
+    assert.equal(measured.cloudsSource, 'observed');
+    const unavailable = interpolatedWeather(false).result;
+    assert.equal(unavailable.valid, true);
+    assert(Number.isNaN(unavailable.outside));
+    assert.equal(unavailable.clouds, 0);
+    assert.equal(unavailable.outsideSource, 'unavailable');
+    assert.equal(unavailable.cloudsSource, 'clear-sky-fallback');
+    assert.equal(forecastAt([{ time: now - 4 * 3600000, temperature: 30, clouds: 0 },
+        { time: now + 3600000, temperature: 20, clouds: 100 }], now), undefined);
+});
+
+test('evening cooling works between forecast samples and is disabled without current temperature', () => {
+    const evening = atTime(now, '18:00');
+    const samples = [-1, 2, 5].map((h) => ({ time: evening + h * 3600000, temperature: 30 - 2 * h, clouds: 0 }));
+    const i = {
+        now: evening, position: 25, roomTemperature: 24, sun: { azimuth: 270, elevation: 35 },
+        weather: { ...weather(), outside: 30, points: samples.slice(1), interpolationPoints: samples },
+    };
+    const r = { managedDate: localDate(now) };
+    const d = run(i, { windowAzimuth: 270 }, r, { openingStabilityMinutes: 0 });
+    assert.equal(d.decisionReason, 'EVENING_RELAXATION');
+    assert.equal(d.effectiveTargetPosition, 50);
+    const unknown = run({ ...i, weather: { ...i.weather, outside: NaN } }, { windowAzimuth: 270 }, r);
+    assert.equal(unknown.effectiveTargetPosition, 25);
+});
+
+test('ten-minute future sampling sees a solar exposure interval between weather timestamps', () => {
+    const start = new Date(2026, 6, 1, 10).getTime();
+    const middle = solarPosition(start + 1.5 * 3600000, 52.52, 13.405);
+    const window = { ...w(), windowAzimuth: middle.azimuth, sunAzimuthMin: middle.azimuth - 10, sunAzimuthMax: middle.azimuth + 10 };
+    for (const hour of [0, 3]) assert.equal(exposure(solarPosition(start + hour * 3600000, 52.52, 13.405), 0, window, c()), 0);
+    const samples = futureSunSamples(start, 3, 52.52, 13.405, () => 0);
+    assert.equal(samples.length, 18);
+    assert(Math.max(...samples.map((p) => exposure(p.sun, p.clouds, window, c()))) > 30);
+    const d = run({ now: start, sun: solarPosition(start, 52.52, 13.405), futureSuns: samples }, window);
+    assert(d.effectiveTargetPosition < 100);
+    assert.deepEqual(futureSunSamples(start, 0, 52.52, 13.405, () => 0), []);
+    assert.equal(futureSunSamples(start, 0.25, 52.52, 13.405, () => 0).length, 2);
+});
+
+test('new thermal and solar configuration rejects impossible ranges', () => {
+    for (const overrides of [
+        { openingStabilityMinutes: -1 }, { thermalActivationRisk: 101 },
+        { thermalActivationRisk: 5, thermalActivationHysteresis: 6 },
+        { roomOverheatTemperature: 29, emergencyRoomTemperature: 28 },
+        { roomOverheatMinimumRisk: 101 }, { lowSunFullStrengthElevation: 0 },
+        { futureExposureHours: 25 },
+    ]) assert.throws(() => parseConfig(overrides));
+});
+
+test('packaged native defaults agree with the defaults exercised by the decision engine', () => {
+    assert.deepEqual(require('../io-package.json').native, defaults);
 });

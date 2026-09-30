@@ -32,6 +32,26 @@ export function exposure(sun: SunPosition, clouds: number, w: WindowConfig, c: C
     )
         return 0;
     const azimuthFactor = Math.max(0, Math.cos((angleDistance(az, w.windowAzimuth) * Math.PI) / 180));
-    const elevationFactor = Math.min(1, Math.sin((sun.elevation * Math.PI) / 180) / Math.sin(Math.PI / 4));
-    return clamp(100 * azimuthFactor * elevationFactor * (1 - (c.cloudAttenuation * clamp(clouds)) / 100));
+    // Incidence on a vertical facade, with a separate, tunable horizon ramp.
+    // The ramp approximates low-sun attenuation; this is an exposure index, not W/m².
+    const incidence = azimuthFactor * Math.max(0, Math.cos((sun.elevation * Math.PI) / 180));
+    const horizonFactor = clamp(sun.elevation / c.lowSunFullStrengthElevation, 0, 1);
+    return clamp(100 * incidence * horizonFactor * (1 - (c.cloudAttenuation * clamp(clouds)) / 100));
+}
+
+export function futureSunSamples(
+    now: number,
+    hours: number,
+    latitude: number,
+    longitude: number,
+    cloudsAt: (time: number) => number,
+): { sun: SunPosition; clouds: number }[] {
+    const samples = [];
+    const end = now + hours * 3600000;
+    // Solar geometry changes between the weather provider's three-hour timestamps.
+    for (let time = Math.min(now + 10 * 60000, end); time > now; time = Math.min(time + 10 * 60000, end)) {
+        samples.push({ sun: solarPosition(time, latitude, longitude), clouds: cloudsAt(time) });
+        if (time === end) break;
+    }
+    return samples;
 }

@@ -2,14 +2,15 @@ import { Adapter, type AdapterOptions } from '@iobroker/adapter-core';
 import { randomUUID } from 'node:crypto';
 import { parseConfig, type Config, type WindowConfig } from './lib/config';
 import { atTime, decide, localDate, newRuntime, observePosition, pauseExpired, type Runtime } from './lib/engine';
-import { solarPosition, sunset, type SunPosition } from './lib/solar';
-import { forecastMappings, numeric, prepareWeather, timestamp, type Sample } from './lib/weather';
+import { futureSunSamples, solarPosition, sunset, type SunPosition } from './lib/solar';
+import { forecastAt, forecastMappings, numeric, prepareWeather, timestamp, type Sample } from './lib/weather';
 
 export class BlindControl extends Adapter {
     private settings!: Config;
     private readonly inputs = new Map<string, Sample>();
     private readonly runtime = new Map<string, Runtime>();
     private readonly switches = new Map<string, boolean>();
+    private readonly keepClosedSwitches = new Map<string, boolean>();
     private controls = {
         enabled: false,
         pauseToday: false,
@@ -136,6 +137,8 @@ export class BlindControl extends Adapter {
             forecastHeatLoad24h: 0,
             currentOutsideTemperature: 0,
             currentCloudCover: 0,
+            currentOutsideTemperatureSource: '',
+            currentCloudCoverSource: '',
             nextVacationOpen: 0,
             nextVacationClose: 0,
         };
@@ -149,6 +152,9 @@ export class BlindControl extends Adapter {
             await this.object(`${prefix}.autoOpenMorning`, w.autoOpenMorning, true);
             w.autoOpenMorning = (await this.getStateAsync(`${prefix}.autoOpenMorning`))?.val === true;
             await this.setStateAsync(`${prefix}.autoOpenMorning`, w.autoOpenMorning, true);
+            await this.object(`${prefix}.keepClosed`, false, true);
+            this.keepClosedSwitches.set(w.id, (await this.getStateAsync(`${prefix}.keepClosed`))?.val === true);
+            await this.setStateAsync(`${prefix}.keepClosed`, this.keepClosedSwitches.get(w.id)!, true);
             await this.object(`${prefix}.runtime`, JSON.stringify(newRuntime()));
             const raw = (await this.getStateAsync(`${prefix}.runtime`))?.val;
             try {
@@ -163,12 +169,16 @@ export class BlindControl extends Adapter {
                     )
                         throw new Error(`Invalid runtime ${key}`);
                 }
-                for (const key of ['manualPosition', 'targetPosition', 'observedPosition'] as const)
+                for (const key of ['manualPosition', 'targetPosition', 'observedPosition', 'openingTarget'] as const)
                     if (
                         r[key] !== null &&
                         (typeof r[key] !== 'number' || !Number.isFinite(r[key]) || r[key]! < 0 || r[key]! > 100)
                     )
                         throw new Error(`Invalid runtime ${key}`);
+                // Time offline is not evidence of stable weather for reopening.
+                r.openingSince = 0;
+                r.openingTarget = null;
+                r.openingLastEvaluation = 0;
                 this.runtime.set(w.id, r);
             } catch {
                 this.log.error(
@@ -184,6 +194,9 @@ export class BlindControl extends Adapter {
                 solarExposure: 0,
                 decisionSolarExposure: 0,
                 heatRisk: 0,
+                thermalActive: false,
+                roomOverheated: false,
+                openingStableSince: 0,
                 desiredPosition: 0,
                 effectiveTargetPosition: 0,
                 manualHoldActive: false,
@@ -204,6 +217,7 @@ export class BlindControl extends Adapter {
         await this.subscribeStatesAsync('control.*');
         await this.subscribeStatesAsync('windows.*.enabled');
         await this.subscribeStatesAsync('windows.*.autoOpenMorning');
+        await this.subscribeStatesAsync('windows.*.keepClosed');
         const ids = new Set<string>(
             [
                 ...forecastMappings(c).flatMap((m) => [m.timeState, m.temperatureState, m.cloudsState]),
@@ -233,7 +247,7 @@ export class BlindControl extends Adapter {
                 sample = this.inputs.get(w.blindActualState);
             if (!r || !sample) continue;
             const value = numeric(sample, Date.now(), c.blindPositionMaxAge);
-            const previous = r.manualPosition ?? r.targetPosition;
+            const previous = r.observedPosition ?? r.manualPosition ?? r.targetPosition;
             if (value !== undefined && previous !== null && Math.abs(value - previous) > c.manualDetectionTolerance) {
                 observePosition(r, previous, value, Date.now(), c);
             }
@@ -290,10 +304,11 @@ export class BlindControl extends Adapter {
                 await this.setStateAsync(key, state.val, true);
             } else {
                 const window = this.settings.windows.find(
-                    (w) => key === `windows.${w.id}.enabled` || key === `windows.${w.id}.autoOpenMorning`,
+                    (w) => ['enabled', 'autoOpenMorning', 'keepClosed'].some((s) => key === `windows.${w.id}.${s}`),
                 );
                 if (!window) return;
                 if (key.endsWith('.autoOpenMorning')) window.autoOpenMorning = state.val;
+                else if (key.endsWith('.keepClosed')) this.keepClosedSwitches.set(window.id, state.val);
                 else this.switches.set(window.id, state.val);
                 await this.setStateAsync(key, state.val, true);
             }
@@ -373,13 +388,18 @@ export class BlindControl extends Adapter {
             const elevation = numeric(this.inputs.get(c.sunElevationState), now, c.sunPositionMaxAge);
             if (azimuth !== undefined && elevation !== undefined) sun = { azimuth, elevation };
         }
+        const cloudTimeline = [
+            { time: now, temperature: weather.outside, clouds: weather.clouds },
+            ...weather.interpolationPoints.filter((p) => p.time > now),
+        ];
         const futureSuns = haveCoordinates
-            ? weather.points
-                  .filter((p) => p.time <= now + c.futureExposureHours * 3600000)
-                  .map((p) => ({
-                      sun: solarPosition(p.time, this.geoLatitude, this.geoLongitude),
-                      clouds: p.clouds,
-                  }))
+            ? futureSunSamples(
+                  now,
+                  c.futureExposureHours,
+                  this.geoLatitude,
+                  this.geoLongitude,
+                  (time) => forecastAt(cloudTimeline, time)?.clouds ?? 0,
+              )
             : [];
         const closeTime = this.closeTime(now);
         const tomorrow = new Date(now);
@@ -395,6 +415,8 @@ export class BlindControl extends Adapter {
             forecastHeatLoad24h: weather.heatLoad,
             currentOutsideTemperature: weather.outside,
             currentCloudCover: weather.clouds,
+            currentOutsideTemperatureSource: weather.outsideSource,
+            currentCloudCoverSource: weather.cloudsSource,
             nextVacationOpen: this.controls.vacationMode
                 ? now < nextOpen
                     ? nextOpen
@@ -428,6 +450,7 @@ export class BlindControl extends Adapter {
                     now,
                     ...this.controls,
                     windowEnabled: this.switches.get(w.id) === true,
+                    keepClosed: this.keepClosedSwitches.get(w.id) === true,
                     position,
                     roomTemperature,
                     contactOpen,
@@ -443,10 +466,23 @@ export class BlindControl extends Adapter {
             );
             r.heatBand = d.heatBand;
             r.shadeLevel = d.shadeLevel;
+            r.thermalActive = d.thermalActive;
+            r.roomOverheated = d.roomOverheated;
+            r.openingSince = d.openingSince;
+            r.openingTarget = d.openingTarget;
+            r.openingLastEvaluation = d.openingLastEvaluation;
             // Already at the daily target: remember the event without pretending a movement occurred.
             if (!this.controls.dryRun && d.event && d.blockedReason === 'POSITION_CHANGE_TOO_SMALL') {
-                if (d.event === 'morning') r.morningDate = localDate(now);
-                else r.vacationCloseDate = localDate(now);
+                if (d.event === 'morning') {
+                    r.morningDate = localDate(now);
+                    r.managedDate = localDate(now);
+                } else r.vacationCloseDate = localDate(now);
+                const eventTime = d.event === 'morning' ? atTime(now, c.earliestAutoOpen) : closeTime;
+                if (eventTime > r.lastManualAction) {
+                    r.manualPosition = null;
+                    r.manualHoldUntil = 0;
+                    r.manualDirection = 0;
+                }
             }
             await this.persist(w.id);
             if (d.move && !this.stopped && revision === this.revision) {
@@ -459,8 +495,18 @@ export class BlindControl extends Adapter {
                 r.commandCompleted = false;
                 // Persist BEFORE issuing a command so a crash cannot erase its cooldown.
                 r.lastAutoAction = now;
-                r.manualPosition = null;
+                // Additional heat protection must not erase a resident's closing preference.
+                const eventReleasesManual =
+                    d.event &&
+                    (d.event === 'morning' ? atTime(now, c.earliestAutoOpen) : closeTime) > r.lastManualAction;
+                if (r.manualDirection >= 0 || eventReleasesManual || d.decisionReason === 'CONTACT_SAFETY_OPEN') {
+                    r.manualPosition = null;
+                    r.manualDirection = 0;
+                }
                 r.manualHoldUntil = 0;
+                r.openingSince = 0;
+                r.openingTarget = null;
+                r.openingLastEvaluation = 0;
                 r.managedDate = localDate(now);
                 if (d.event === 'morning') r.morningDate = localDate(now);
                 if (d.event === 'close') r.vacationCloseDate = localDate(now);
@@ -493,15 +539,18 @@ export class BlindControl extends Adapter {
                 solarExposure: d.solarExposure,
                 decisionSolarExposure: d.decisionSolarExposure,
                 heatRisk: d.heatRisk,
+                thermalActive: d.thermalActive,
+                roomOverheated: d.roomOverheated,
+                openingStableSince: r.openingSince,
                 desiredPosition: d.desiredPosition,
                 effectiveTargetPosition: d.effectiveTargetPosition,
                 manualHoldActive: d.manualHoldActive,
                 manualHoldUntil: r.manualHoldUntil,
                 lastManualAction: r.lastManualAction,
                 lastAutoAction: r.lastAutoAction,
-                nextAutoMovementAllowed: r.lastAutoAction
-                    ? r.lastAutoAction + c.minAutoMovementIntervalMinutes * 60000
-                    : 0,
+                nextAutoMovementAllowed: r.lastAutoAction === now
+                    ? now + c.minAutoMovementIntervalMinutes * 60000
+                    : d.nextAutoMovementAllowed,
                 contactOpen,
                 blocked: d.blocked,
                 blockedReason: d.blockedReason,

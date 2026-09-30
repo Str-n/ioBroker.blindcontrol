@@ -46,6 +46,11 @@
           "sm": 6,
           "type": "number"
         },
+        "openingStabilityMinutes": {
+          "label": "openingStabilityMinutes",
+          "sm": 6,
+          "type": "number"
+        },
         "startupDelaySeconds": {
           "label": "startupDelaySeconds",
           "sm": 6,
@@ -222,6 +227,11 @@
           "label": "roomTemperatureWeight",
           "sm": 6,
           "type": "number"
+        },
+        "_help": {
+          "type": "staticText",
+          "text": "Current observations take precedence. Otherwise current weather is interpolated only between surrounding forecast samples. With no surrounding samples, cloud cover is conservatively treated as clear and evening cooling is disabled when current temperature is unknown. Source diagnostics are under info.",
+          "sm": 12
         }
       }
     },
@@ -271,6 +281,11 @@
         },
         "cloudAttenuation": {
           "label": "cloudAttenuation",
+          "sm": 6,
+          "type": "number"
+        },
+        "lowSunFullStrengthElevation": {
+          "label": "lowSunFullStrengthElevation",
           "sm": 6,
           "type": "number"
         },
@@ -388,6 +403,36 @@
           "label": "heatRiskHysteresis",
           "sm": 6,
           "type": "number"
+        },
+        "thermalActivationRisk": {
+          "label": "thermalActivationRisk",
+          "sm": 6,
+          "type": "number"
+        },
+        "thermalActivationHysteresis": {
+          "label": "thermalActivationHysteresis",
+          "sm": 6,
+          "type": "number"
+        },
+        "roomOverheatTemperature": {
+          "label": "roomOverheatTemperature",
+          "sm": 6,
+          "type": "number"
+        },
+        "roomOverheatHysteresis": {
+          "label": "roomOverheatHysteresis",
+          "sm": 6,
+          "type": "number"
+        },
+        "roomOverheatMinimumRisk": {
+          "label": "roomOverheatMinimumRisk",
+          "sm": 6,
+          "type": "number"
+        },
+        "_help": {
+          "type": "staticText",
+          "text": "Heat shading activates at thermalActivationRisk and releases below that value minus thermalActivationHysteresis. roomOverheatTemperature independently enforces roomOverheatMinimumRisk; emergencyRoomTemperature enforces at least emergencyHeatRisk even with a cool forecast. Ordinary opening requires openingStabilityMinutes of stable decisions.",
+          "sm": 12
         }
       }
     },
@@ -414,6 +459,11 @@
           "label": "selfActionRecognitionTimeout",
           "sm": 6,
           "type": "number"
+        },
+        "_help": {
+          "type": "staticText",
+          "text": "The minimum manual hold always applies. A later scheduled morning or vacation closing releases extended holds. Manual closing prevents ordinary reopening; windows.<id>.keepClosed also prevents scheduled opening until cleared. Contact safety opening remains possible after the minimum hold and movement cooldown.",
+          "sm": 12
         }
       }
     },
