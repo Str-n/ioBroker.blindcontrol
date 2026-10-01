@@ -10,7 +10,7 @@ export interface ShadeLevel {
 export interface ForecastMapping {
     timeState: string;
     temperatureState: string;
-    cloudsState: string;
+    cloudsState?: string;
 }
 export interface WindowConfig {
     id: string;
@@ -61,6 +61,17 @@ export const defaults = {
     openWeatherMapInstance: 'openweathermap.0',
     currentOutsideTemperatureState: '',
     currentCloudCoverState: '',
+    currentSunlightSource: 'clouds',
+    currentRadiationState: '0_userdata.0.sunlight.overall.irradiance_estimated',
+    radiationInputUnit: 'W/m²',
+    radiationLuxPerWm2: 120,
+    radiationValidState: '0_userdata.0.sunlight.overall.valid',
+    radiationLastSuccessState: '0_userdata.0.sunlight.overall.last_success',
+    radiationSourcesState: '0_userdata.0.sunlight.overall.sources_used',
+    radiationStatusState: '0_userdata.0.sunlight.overall.status',
+    radiationMaxAge: 25,
+    radiationRefreshGraceSeconds: 30,
+    radiationMinSunElevation: 5,
     forecastMapping: [] as ForecastMapping[],
     heatLoadBaseTemperature: 22,
     coolingTemperature: 16,
@@ -178,6 +189,26 @@ export function parseConfig(native: Record<string, unknown>): Config {
         if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(config[key])) throw new Error(`Invalid time: ${key}`);
     }
     if (!['openweathermap', 'custom'].includes(config.weatherProvider)) throw new Error('Invalid weather provider');
+    if (
+        !['clouds', 'radiation-first'].includes(config.currentSunlightSource) ||
+        !['W/m²', 'lux'].includes(config.radiationInputUnit) ||
+        config.radiationLuxPerWm2 <= 0 ||
+        config.radiationMaxAge <= 0 ||
+        config.radiationMinSunElevation < 1 ||
+        config.radiationMinSunElevation > 45 ||
+        config.radiationRefreshGraceSeconds > 120
+    )
+        throw new Error('Invalid radiation settings');
+    for (const key of [
+        'currentRadiationState', 'radiationValidState', 'radiationLastSuccessState',
+        'radiationSourcesState', 'radiationStatusState',
+    ] as const) {
+        if (
+            typeof config[key] !== 'string' ||
+            (key === 'currentRadiationState' && config.currentSunlightSource === 'radiation-first' && !config[key].trim())
+        )
+            throw new Error(`Invalid radiation state: ${key}`);
+    }
     if (!['coordinates', 'states'].includes(config.sunSource)) throw new Error('Invalid sun source');
     if (config.sunSource === 'states' && (!config.sunAzimuthState || !config.sunElevationState))
         throw new Error('Sun states required');
@@ -258,7 +289,9 @@ export function parseConfig(native: Record<string, unknown>): Config {
     if (
         !Array.isArray(config.forecastMapping) ||
         (config.weatherProvider === 'custom' && !config.forecastMapping.length) ||
-        config.forecastMapping.some((p) => !p.timeState || !p.temperatureState || !p.cloudsState)
+        config.forecastMapping.some((p) =>
+            !p.timeState || !p.temperatureState || (p.cloudsState !== undefined && typeof p.cloudsState !== 'string'),
+        )
     )
         throw new Error('Invalid forecast mapping');
     const ids = new Set<string>();

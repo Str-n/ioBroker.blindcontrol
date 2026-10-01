@@ -8,10 +8,11 @@ export interface Sample {
 export interface ForecastPoint {
     time: number;
     temperature: number;
-    clouds: number;
+    clouds?: number;
 }
 export interface Weather {
     valid: boolean;
+    forecastCloudsValid: boolean;
     points: ForecastPoint[];
     interpolationPoints: ForecastPoint[];
     risk: number;
@@ -38,7 +39,10 @@ export function forecastAt(points: ForecastPoint[], time: number): ForecastPoint
     return {
         time,
         temperature: a.temperature + (b.temperature - a.temperature) * fraction,
-        clouds: a.clouds + (b.clouds - a.clouds) * fraction,
+        clouds:
+            a.clouds !== undefined && b.clouds !== undefined
+                ? a.clouds + (b.clouds - a.clouds) * fraction
+                : undefined,
     };
 }
 export function numeric(s: Sample | undefined, now: number, maxAgeMinutes: number): number | undefined {
@@ -89,7 +93,8 @@ export function prepareWeather(now: number, states: Map<string, Sample>, c: Conf
         const timeSample = states.get(m.timeState);
         const time = timestamp(timeSample?.val);
         const temperature = numeric(states.get(m.temperatureState), now, c.forecastMaxAge);
-        const clouds = numeric(states.get(m.cloudsState), now, c.forecastMaxAge);
+        const cloudValue = numeric(states.get(m.cloudsState || ''), now, c.forecastMaxAge);
+        const clouds = cloudValue !== undefined && cloudValue >= 0 && cloudValue <= 100 ? cloudValue : undefined;
         if (
             !timeSample ||
             (timeSample.q || 0) !== 0 ||
@@ -99,10 +104,7 @@ export function prepareWeather(now: number, states: Map<string, Sample>, c: Conf
             !Number.isFinite(time) ||
             temperature === undefined ||
             temperature < -90 ||
-            temperature > 65 ||
-            clouds === undefined ||
-            clouds < 0 ||
-            clouds > 100
+            temperature > 65
         )
             continue;
         if (time >= now - 3.5 * 3600000 && time <= now + 86400000 + 3.5 * 3600000)
@@ -150,6 +152,7 @@ export function prepareWeather(now: number, states: Map<string, Sample>, c: Conf
     const clouds = observedClouds ? cloudValue : (current?.clouds ?? 0);
     return {
         valid,
+        forecastCloudsValid: valid && unique.every((p) => p.clouds !== undefined),
         points: unique,
         interpolationPoints,
         risk,
@@ -160,6 +163,6 @@ export function prepareWeather(now: number, states: Map<string, Sample>, c: Conf
         outside,
         clouds,
         outsideSource: observedOutside ? 'observed' : current ? 'interpolated' : 'unavailable',
-        cloudsSource: observedClouds ? 'observed' : current ? 'interpolated' : 'clear-sky-fallback',
+        cloudsSource: observedClouds ? 'observed' : current?.clouds !== undefined ? 'interpolated' : 'clear-sky-fallback',
     };
 }

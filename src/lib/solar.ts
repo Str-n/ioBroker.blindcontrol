@@ -16,7 +16,15 @@ export function solarPosition(time: number, latitude: number, longitude: number)
 export function sunset(time: number, latitude: number, longitude: number): number {
     return SunCalc.getTimes(new Date(time), latitude, longitude).sunset.getTime();
 }
-export function exposure(sun: SunPosition, clouds: number, w: WindowConfig, c: Config): number {
+// Haurwitz clear-sky horizontal irradiance, also used by the outdoor brightness producer.
+export function clearSkyIrradiance(elevation: number): number {
+    if (!Number.isFinite(elevation) || elevation <= 0 || elevation > 90) return 0;
+    const sine = Math.sin((elevation * Math.PI) / 180);
+    return 1098 * sine * Math.exp(-0.059 / sine);
+}
+export function exposure(
+    sun: SunPosition, clouds: number, w: WindowConfig, c: Config, sunlightFactor?: number,
+): number {
     if (
         sun.elevation <= 0 ||
         (w.sunElevationMin !== undefined && sun.elevation < w.sunElevationMin) ||
@@ -36,7 +44,11 @@ export function exposure(sun: SunPosition, clouds: number, w: WindowConfig, c: C
     // The ramp approximates low-sun attenuation; this is an exposure index, not W/m².
     const incidence = azimuthFactor * Math.max(0, Math.cos((sun.elevation * Math.PI) / 180));
     const horizonFactor = clamp(sun.elevation / c.lowSunFullStrengthElevation, 0, 1);
-    return clamp(100 * incidence * horizonFactor * (1 - (c.cloudAttenuation * clamp(clouds)) / 100));
+    // A radiation factor replaces cloud attenuation; applying both would count weather twice.
+    const factor = Number.isFinite(sunlightFactor)
+        ? clamp(sunlightFactor!, 0, 1)
+        : 1 - (c.cloudAttenuation * clamp(clouds)) / 100;
+    return clamp(100 * incidence * horizonFactor * factor);
 }
 
 export function futureSunSamples(
@@ -44,13 +56,15 @@ export function futureSunSamples(
     hours: number,
     latitude: number,
     longitude: number,
-    cloudsAt: (time: number) => number,
+    cloudsAt: (time: number) => number | undefined,
 ): { sun: SunPosition; clouds: number }[] {
     const samples = [];
     const end = now + hours * 3600000;
     // Solar geometry changes between the weather provider's three-hour timestamps.
     for (let time = Math.min(now + 10 * 60000, end); time > now; time = Math.min(time + 10 * 60000, end)) {
-        samples.push({ sun: solarPosition(time, latitude, longitude), clouds: cloudsAt(time) });
+        const clouds = cloudsAt(time);
+        if (clouds !== undefined && Number.isFinite(clouds) && clouds >= 0 && clouds <= 100)
+            samples.push({ sun: solarPosition(time, latitude, longitude), clouds });
         if (time === end) break;
     }
     return samples;

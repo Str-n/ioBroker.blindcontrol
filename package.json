@@ -23,7 +23,7 @@
   ],
   "scripts": {
     "build": "tsc",
-    "test": "npm run build && node test/engine.test.cjs && node test/adapter.test.cjs",
+    "test": "npm run build && node test/engine.test.cjs && node test/radiation.test.cjs && node test/adapter.test.cjs",
     "prepack": "npm run build",
     "admin:generate": "npm run build && node scripts/generate-admin.cjs"
   },

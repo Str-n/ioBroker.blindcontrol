@@ -61,6 +61,7 @@ export interface Input {
     contactValid: boolean;
     sun?: SunPosition;
     weather: Weather;
+    currentSunlightFactor?: number;
     futureSuns: { sun: SunPosition; clouds: number }[];
     vacationCloseTime: number;
 }
@@ -173,7 +174,7 @@ export function decide(i: Input, w: WindowConfig, c: Config, r: Runtime): Decisi
             (r.thermalActive && d.heatRisk >= c.thermalActivationRisk - c.thermalActivationHysteresis);
     }
     if (validSun && i.weather.valid) {
-        d.solarExposure = exposure(i.sun!, i.weather.clouds, w, c);
+        d.solarExposure = exposure(i.sun!, i.weather.clouds, w, c, i.currentSunlightFactor);
         const future = Math.max(0, ...i.futureSuns.map((p) => exposure(p.sun, p.clouds, w, c)));
         d.decisionSolarExposure = Math.max(d.solarExposure, d.heatBand >= 2 ? future * c.futureExposureWeight : 0);
         d.shadeLevel = hysteresis(

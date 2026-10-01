@@ -5,6 +5,7 @@ const Module = require('node:module');
 const { defaults, windowDefaults } = require('../build/lib/config');
 const { forecastMappings } = require('../build/lib/weather');
 const { newRuntime, localDate } = require('../build/lib/engine');
+const { clearSkyIrradiance } = require('../build/lib/solar');
 
 class MockAdapter extends EventEmitter {
     constructor(options) {
@@ -14,6 +15,7 @@ class MockAdapter extends EventEmitter {
         this.states = options.states ?? new Map();
         this.foreign = options.foreign;
         this.commands = [];
+        this.foreignSubscriptions = new Set();
         this.objects = new Map();
         this.logs = [];
         this.log = Object.fromEntries(
@@ -39,7 +41,7 @@ class MockAdapter extends EventEmitter {
         return this.foreign.get(id);
     }
     async subscribeStatesAsync() {}
-    async subscribeForeignStatesAsync() {}
+    async subscribeForeignStatesAsync(id) { this.foreignSubscriptions.add(id); }
     async setForeignStateAsync(id, val, ack) {
         const runtime = JSON.parse(this.states.get('windows.south.runtime').val);
         assert(runtime.lastAutoAction > 0, 'cooldown must be durable before command');
@@ -411,5 +413,118 @@ test('old persisted runtimes migrate and weather-source uncertainty is visible i
     assert.equal(a.states.get('info.currentCloudCover').val, 0);
     assert.equal(a.states.get('windows.south.thermalActive').val, true);
     assert.equal(a.states.get('windows.south.roomOverheated').val, true);
+    assert.equal(a.commands.length, 0);
+});
+
+function radiationInputs(factor = 1, time = Date.now(), clouds = 80) {
+    return new Map([
+        [defaults.currentRadiationState, { val: clearSkyIrradiance(50) * factor, ts: time, ack: true }],
+        [defaults.radiationValidState, { val: true, ts: time, ack: true }],
+        [defaults.radiationLastSuccessState, { val: time, ts: time, ack: true }],
+        [defaults.radiationSourcesState, { val: '["pv","dwd"]', ts: time, ack: true }],
+        [defaults.radiationStatusState, { val: 'Multiple sources', ts: time, ack: true }],
+        ['weather.clouds', { val: clouds, ts: time, ack: true }],
+    ]);
+}
+const radiationConfig = {
+    currentSunlightSource: 'radiation-first', currentCloudCoverState: 'weather.clouds', futureExposureHours: 0,
+};
+
+test('radiation-first integration subscribes to producer metadata and shades despite excessive cloud estimates', async (t) => {
+    fixedClock(t);
+    const a = await fixture(t, radiationConfig, undefined, radiationInputs());
+    for (const key of ['currentRadiationState', 'radiationValidState', 'radiationLastSuccessState', 'radiationSourcesState', 'radiationStatusState'])
+        assert(a.foreignSubscriptions.has(defaults[key]));
+    await a.evaluate();
+    assert.equal(a.commands.length, 1);
+    assert.equal(a.commands[0].val, 0);
+    assert.equal(a.states.get('info.currentSunlightSource').val, 'radiation');
+    assert.equal(a.states.get('info.radiationValid').val, true);
+    assert.equal(a.states.get('windows.south.cloudBasedTargetPosition').val, 100);
+    assert(a.states.get('windows.south.solarExposure').val > a.states.get('windows.south.cloudBasedSolarExposure').val);
+    const legacy = await fixture(t);
+    assert(!legacy.foreignSubscriptions.has(defaults.currentRadiationState));
+});
+
+test('weak radiation permits reopening only after the existing continuous stability delay', async (t) => {
+    const advance = fixedClock(t);
+    const a = await fixture(t, { ...radiationConfig, sunPositionMaxAge: 180 }, undefined, radiationInputs(0.1, Date.now(), 0));
+    a.inputs.set('blind.actual', { val: 50, ts: Date.now(), ack: true });
+    a.runtime.get('south').managedDate = localDate(Date.now());
+    for (let minute = 0; minute <= 20; minute += 5) {
+        await a.evaluate();
+        assert.equal(a.commands.length, minute === 20 ? 1 : 0);
+        assert.equal(a.states.get('windows.south.desiredPosition').val, 100);
+        assert.equal(a.states.get('windows.south.cloudBasedTargetPosition').val, 0);
+        if (minute < 20) {
+            assert.equal(a.states.get('windows.south.blockedReason').val, 'OPENING_NOT_STABLE');
+            advance(5);
+        }
+    }
+    assert.equal(a.commands[0].val, 100);
+});
+
+test('radiation works without forecast clouds and still requires a valid temperature forecast', async (t) => {
+    fixedClock(t);
+    const a = await fixture(t, { ...radiationConfig, futureExposureHours: 3 }, undefined, radiationInputs());
+    for (const mapping of forecastMappings(a.settings)) a.inputs.delete(mapping.cloudsState);
+    await a.evaluate();
+    assert.equal(a.commands.length, 1);
+    assert.equal(a.commands[0].val, 0);
+    assert.equal(a.states.get('info.forecastValid').val, true);
+    assert.equal(a.states.get('info.forecastCloudsValid').val, false);
+    assert.equal(a.states.get('info.futureExposureSampleCount').val, 0);
+    for (const mapping of forecastMappings(a.settings)) a.inputs.delete(mapping.temperatureState);
+    await a.evaluate();
+    assert.equal(a.commands.length, 1);
+    assert.equal(a.states.get('windows.south.blockedReason').val, 'INVALID_FORECAST');
+});
+
+test('radiation publication boundaries, grace expiry and dry-run comparison survive adapter integration', async (t) => {
+    const advance = fixedClock(t);
+    const a = await fixture(t, { ...radiationConfig, dryRun: true }, undefined, radiationInputs());
+    await a.evaluate();
+    assert.equal(a.commands.length, 0);
+    assert.equal(a.states.get('windows.south.desiredPosition').val, 0);
+    advance(1 / 60);
+    await a.stateChanged(defaults.radiationValidState, { val: false, ts: Date.now(), ack: true });
+    await a.stateChanged(defaults.currentRadiationState, { val: 0, ts: Date.now(), ack: true });
+    await a.evaluate();
+    assert.equal(a.states.get('info.radiationRefreshing').val, true);
+    assert.equal(a.states.get('info.currentSunlightFactor').val, 1);
+    assert(a.radiationRefresh, 'grace expiry must schedule evaluation before the normal five-minute interval');
+    advance(31 / 60);
+    await a.evaluate();
+    assert.equal(a.states.get('info.currentSunlightSource').val, 'clouds');
+    assert.equal(a.states.get('info.radiationValid').val, false);
+    assert.equal(a.states.get('info.radiationReason').val, 'PRODUCER_INVALID');
+    assert.equal(a.radiationRefresh, undefined);
+    const complete = radiationInputs(0.1);
+    // Publish all data first, then the completion flag.
+    for (const [id, state] of complete) if (id !== defaults.radiationValidState) await a.stateChanged(id, state);
+    await a.stateChanged(defaults.radiationValidState, complete.get(defaults.radiationValidState));
+    await a.evaluate();
+    assert.equal(a.states.get('info.currentSunlightSource').val, 'radiation');
+    assert.equal(a.states.get('windows.south.desiredPosition').val, 100);
+    assert.equal(a.commands.length, 0);
+});
+
+test('invalid radiation falls back to clouds while contact safety and manual holds retain priority', async (t) => {
+    fixedClock(t);
+    const a = await fixture(t, radiationConfig, undefined, radiationInputs());
+    a.inputs.set(defaults.currentRadiationState, { val: 100, ts: Date.now() - 26 * 60000, ack: true });
+    await a.evaluate();
+    assert.equal(a.states.get('info.radiationReason').val, 'INVALID_RADIATION');
+    assert.equal(a.states.get('info.currentSunlightSource').val, 'clouds');
+    assert.equal(a.commands.length, 0);
+    for (const [id, state] of radiationInputs()) a.inputs.set(id, state);
+    a.settings.windows[0].contactState = 'contact';
+    a.inputs.set('contact', { val: true, ts: Date.now(), ack: true });
+    await a.evaluate();
+    assert.equal(a.states.get('windows.south.blockedReason').val, 'CONTACT_OPEN');
+    a.inputs.set('contact', { val: false, ts: Date.now(), ack: true });
+    await a.stateChanged('blind.actual', { val: 75, ts: Date.now(), ack: true });
+    await a.evaluate();
+    assert.equal(a.states.get('windows.south.blockedReason').val, 'MANUAL_HOLD');
     assert.equal(a.commands.length, 0);
 });

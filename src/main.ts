@@ -1,9 +1,12 @@
 import { Adapter, type AdapterOptions } from '@iobroker/adapter-core';
 import { randomUUID } from 'node:crypto';
 import { parseConfig, type Config, type WindowConfig } from './lib/config';
-import { atTime, decide, localDate, newRuntime, observePosition, pauseExpired, type Runtime } from './lib/engine';
+import {
+    atTime, decide, localDate, newRuntime, observePosition, pauseExpired, type Input, type Runtime,
+} from './lib/engine';
 import { futureSunSamples, solarPosition, sunset, type SunPosition } from './lib/solar';
 import { forecastAt, forecastMappings, numeric, prepareWeather, timestamp, type Sample } from './lib/weather';
+import { RadiationTracker, radiationStateIds } from './lib/radiation';
 
 export class BlindControl extends Adapter {
     private settings!: Config;
@@ -11,6 +14,7 @@ export class BlindControl extends Adapter {
     private readonly runtime = new Map<string, Runtime>();
     private readonly switches = new Map<string, boolean>();
     private readonly keepClosedSwitches = new Map<string, boolean>();
+    private readonly radiation = new RadiationTracker();
     private controls = {
         enabled: false,
         pauseToday: false,
@@ -26,6 +30,7 @@ export class BlindControl extends Adapter {
     private interval?: ReturnType<typeof setInterval>;
     private midnight?: ReturnType<typeof setTimeout>;
     private startup?: ReturnType<typeof setTimeout>;
+    private radiationRefresh?: ReturnType<typeof setTimeout>;
     private queue: Promise<void> = Promise.resolve();
     private lastReasons = new Map<string, string>();
     // A change arriving while evaluation awaits database writes cancels its stale command.
@@ -45,6 +50,7 @@ export class BlindControl extends Adapter {
             if (this.interval) clearInterval(this.interval);
             if (this.midnight) clearTimeout(this.midnight);
             if (this.startup) clearTimeout(this.startup);
+            if (this.radiationRefresh) clearTimeout(this.radiationRefresh);
             void this.setStateAsync('info.active', false, true).finally(callback);
         });
     }
@@ -131,6 +137,8 @@ export class BlindControl extends Adapter {
             active: false,
             lastEvaluation: 0,
             forecastValid: false,
+            forecastCloudsValid: false,
+            futureExposureSampleCount: 0,
             forecastHeatRisk: 0,
             forecastMaxTemperature24h: 0,
             forecastMinTemperature24h: 0,
@@ -139,6 +147,18 @@ export class BlindControl extends Adapter {
             currentCloudCover: 0,
             currentOutsideTemperatureSource: '',
             currentCloudCoverSource: '',
+            currentSunlightSource: '',
+            currentSunlightFactor: 0,
+            radiationReason: '',
+            radiationValid: false,
+            radiationIrradiance: 0,
+            radiationClearSkyIrradiance: 0,
+            radiationNormalizedFactor: 0,
+            radiationSampleTime: 0,
+            radiationQuality: '',
+            radiationSources: '',
+            radiationStatus: '',
+            radiationRefreshing: false,
             nextVacationOpen: 0,
             nextVacationClose: 0,
         };
@@ -192,6 +212,8 @@ export class BlindControl extends Adapter {
                 currentPosition: 0,
                 roomTemperature: 0,
                 solarExposure: 0,
+                cloudBasedSolarExposure: 0,
+                cloudBasedTargetPosition: 0,
                 decisionSolarExposure: 0,
                 heatRisk: 0,
                 thermalActive: false,
@@ -220,7 +242,8 @@ export class BlindControl extends Adapter {
         await this.subscribeStatesAsync('windows.*.keepClosed');
         const ids = new Set<string>(
             [
-                ...forecastMappings(c).flatMap((m) => [m.timeState, m.temperatureState, m.cloudsState]),
+                ...forecastMappings(c).flatMap((m) => [m.timeState, m.temperatureState, m.cloudsState || '']),
+                ...radiationStateIds(c),
                 c.currentOutsideTemperatureState,
                 c.currentCloudCoverState,
                 c.sunAzimuthState,
@@ -388,6 +411,15 @@ export class BlindControl extends Adapter {
             const elevation = numeric(this.inputs.get(c.sunElevationState), now, c.sunPositionMaxAge);
             if (azimuth !== undefined && elevation !== undefined) sun = { azimuth, elevation };
         }
+        const sunlight = this.radiation.evaluate(now, this.inputs, c, sun, weather);
+        if (this.radiationRefresh) clearTimeout(this.radiationRefresh);
+        this.radiationRefresh = undefined;
+        if (sunlight.retryAt !== undefined) {
+            this.radiationRefresh = setTimeout(() => {
+                this.radiationRefresh = undefined;
+                this.requestEvaluation();
+            }, Math.max(1, sunlight.retryAt - Date.now()));
+        }
         const cloudTimeline = [
             { time: now, temperature: weather.outside, clouds: weather.clouds },
             ...weather.interpolationPoints.filter((p) => p.time > now),
@@ -398,7 +430,7 @@ export class BlindControl extends Adapter {
                   c.futureExposureHours,
                   this.geoLatitude,
                   this.geoLongitude,
-                  (time) => forecastAt(cloudTimeline, time)?.clouds ?? 0,
+                  (time) => forecastAt(cloudTimeline, time)?.clouds,
               )
             : [];
         const closeTime = this.closeTime(now);
@@ -409,6 +441,8 @@ export class BlindControl extends Adapter {
             active: this.controls.enabled && !this.controls.pauseToday,
             lastEvaluation: now,
             forecastValid: weather.valid,
+            forecastCloudsValid: weather.forecastCloudsValid,
+            futureExposureSampleCount: futureSuns.length,
             forecastHeatRisk: weather.valid ? weather.risk : null,
             forecastMaxTemperature24h: weather.max,
             forecastMinTemperature24h: weather.min,
@@ -417,6 +451,18 @@ export class BlindControl extends Adapter {
             currentCloudCover: weather.clouds,
             currentOutsideTemperatureSource: weather.outsideSource,
             currentCloudCoverSource: weather.cloudsSource,
+            currentSunlightSource: sunlight.source,
+            currentSunlightFactor: sunlight.factor,
+            radiationReason: sunlight.reason,
+            radiationValid: sunlight.valid,
+            radiationIrradiance: sunlight.irradiance,
+            radiationClearSkyIrradiance: sunlight.clearSkyIrradiance,
+            radiationNormalizedFactor: sunlight.normalizedFactor,
+            radiationSampleTime: sunlight.sampleTime,
+            radiationQuality: sunlight.quality,
+            radiationSources: sunlight.sources,
+            radiationStatus: sunlight.status,
+            radiationRefreshing: sunlight.refreshing,
             nextVacationOpen: this.controls.vacationMode
                 ? now < nextOpen
                     ? nextOpen
@@ -445,25 +491,27 @@ export class BlindControl extends Adapter {
                     contact.ts <= now + 60000 &&
                     now - contact.ts <= c.contactMaxAge * 60000);
             const contactOpen = contactValid && !!contact && String(contact.val) === String(w.contactOpenValue);
-            const d = decide(
-                {
-                    now,
-                    ...this.controls,
-                    windowEnabled: this.switches.get(w.id) === true,
-                    keepClosed: this.keepClosedSwitches.get(w.id) === true,
-                    position,
-                    roomTemperature,
-                    contactOpen,
-                    contactValid,
-                    sun,
-                    weather,
-                    futureSuns,
-                    vacationCloseTime: closeTime,
-                },
-                w,
-                c,
-                r,
-            );
+            const input: Input = {
+                now,
+                ...this.controls,
+                windowEnabled: this.switches.get(w.id) === true,
+                keepClosed: this.keepClosedSwitches.get(w.id) === true,
+                position,
+                roomTemperature,
+                contactOpen,
+                contactValid,
+                sun,
+                weather,
+                currentSunlightFactor: sunlight.factor,
+                futureSuns,
+                vacationCloseTime: closeTime,
+            };
+            const d = decide(input, w, c, r);
+            // Compare both models against the same runtime without advancing a shadow controller.
+            const cloudDecision =
+                c.currentSunlightSource === 'radiation-first'
+                    ? decide({ ...input, currentSunlightFactor: undefined }, w, c, r)
+                    : d;
             r.heatBand = d.heatBand;
             r.shadeLevel = d.shadeLevel;
             r.thermalActive = d.thermalActive;
@@ -537,6 +585,8 @@ export class BlindControl extends Adapter {
                 currentPosition: position,
                 roomTemperature,
                 solarExposure: d.solarExposure,
+                cloudBasedSolarExposure: cloudDecision.solarExposure,
+                cloudBasedTargetPosition: cloudDecision.desiredPosition,
                 decisionSolarExposure: d.decisionSolarExposure,
                 heatRisk: d.heatRisk,
                 thermalActive: d.thermalActive,

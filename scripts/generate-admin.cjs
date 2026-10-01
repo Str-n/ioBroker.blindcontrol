@@ -80,6 +80,19 @@ const tabs = {
         'futureExposureHours',
         'futureExposureWeight',
     ],
+    Radiation: [
+        'currentSunlightSource',
+        'currentRadiationState',
+        'radiationInputUnit',
+        'radiationLuxPerWm2',
+        'radiationValidState',
+        'radiationLastSuccessState',
+        'radiationSourcesState',
+        'radiationStatusState',
+        'radiationMaxAge',
+        'radiationRefreshGraceSeconds',
+        'radiationMinSunElevation',
+    ],
     Shading: [
         'shadeLevels',
         'heatRiskThresholds',
@@ -136,6 +149,8 @@ const table = (columns, template = {}) => ({
 const custom = {
     weatherProvider: select(['openweathermap', 'custom']),
     sunSource: select(['coordinates', 'states']),
+    currentSunlightSource: select(['clouds', 'radiation-first']),
+    radiationInputUnit: select(['W/m²', 'lux']),
     forecastMapping: table(['timeState', 'temperatureState', 'cloudsState']),
     shadeLevels: table(['name', 'minExposure', 'position'], {
         name: '',
@@ -275,7 +290,12 @@ items._Manual.items._help = {
 };
 items._Weather.items._help = {
     type: 'staticText',
-    text: 'Current observations take precedence. Otherwise current weather is interpolated only between surrounding forecast samples. With no surrounding samples, cloud cover is conservatively treated as clear and evening cooling is disabled when current temperature is unknown. Source diagnostics are under info.',
+    text: 'Current observations take precedence. Otherwise current weather is interpolated only between surrounding forecast samples. Temperature forecasts remain usable without cloud data; future exposure is sampled only where clouds are known. With no current cloud estimate, cloud mode conservatively assumes clear sky. Unknown current temperature disables evening cooling. Custom cloud state IDs are optional. Source diagnostics are under info.',
+    sm: 12,
+};
+items._Radiation.items._help = {
+    type: 'staticText',
+    text: 'Choose radiation-first to prefer the configured current estimate, with cloud fallback. Defaults match the outdoor brightness model (horizontal W/m²). For the lux output use overall.estimated and select lux; conversion defaults to 120 lx per W/m². Optional metadata IDs may be cleared for standalone sensors. valid must be boolean, last_success a timestamp, sources_used a JSON string array, status text. Low sun below 5° uses clouds. Clipped or unverified estimates can only strengthen protection relative to clouds. Fresh completed data may be retained for 30 seconds during publication; ordinary opening still needs 20 minutes of stability. Compare windows.<id>.solarExposure / desiredPosition with cloudBasedSolarExposure / cloudBasedTargetPosition in dry run.',
     sm: 12,
 };
 items._Windows.label = { en: 'Windows', de: 'Fenster' };
